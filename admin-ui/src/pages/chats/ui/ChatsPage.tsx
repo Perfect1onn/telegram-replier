@@ -74,6 +74,7 @@ export function ChatsPage({
   }
 
   const allowedIds = new Set(chats.map((chat) => chat.chatId));
+  const dialogTitles = new Map(dialogs.map((dialog) => [dialog.chatId, dialog.title]));
   const visibleDialogs = dialogs.filter(
     (dialog) =>
       !allowedIds.has(dialog.chatId) &&
@@ -159,7 +160,8 @@ export function ChatsPage({
           chats.map((chat) => (
             <article className="item" key={chat.chatId}>
               <div>
-                <h3>Чат {chat.chatId}</h3>
+                <h3>{dialogTitles.get(chat.chatId) || `Чат ${chat.chatId}`}</h3>
+                <small className="chat-id">ID {chat.chatId}</small>
                 <span className={`badge ${chat.mode.toLowerCase()}`}>{chat.mode}</span>
                 <span className={`badge ${chat.enabled ? 'enabled' : 'disabled'}`}>
                   {chat.enabled ? 'Включён' : 'Выключен'}

@@ -1,4 +1,5 @@
 import { Prisma, type Message, type PrismaClient } from '@prisma/client';
+import { setTimeout as wait } from 'node:timers/promises';
 import {
   ConversationChunker,
   type Chunk,
@@ -34,15 +35,19 @@ export class RagService implements IRagService {
 
     const vector = await this.embeddings.embedQuery(query);
 
-    return this.vectors.search(chatId, vector, limit);
+    return this.vectors.search(vector, limit);
   }
 
   async indexChat(chatId: string): Promise<void> {
-    for (let page = 0; page < 100; page++) {
-      if (!(await this.indexBatch(chatId))) return;
-    }
+    for (;;) {
+      try {
+        if (!(await this.indexBatch(chatId))) return;
+      } catch (error) {
+        if (!(error instanceof Error) || error.message !== 'Concurrent indexing') throw error;
 
-    throw new Error('Indexing backlog exceeds one job');
+        await wait(250);
+      }
+    }
   }
 
   async reindexChat(chatId: string): Promise<void> {

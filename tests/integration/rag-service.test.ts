@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { after, test } from 'node:test';
 import { PrismaClient } from '@prisma/client';
 import { RagService } from '../../src/infrastructure/rag/rag-service.ts';
@@ -29,11 +30,15 @@ const fakeEmbeddings: IEmbeddingService = {
     return vector;
   },
 };
-const rag = new RagService(db, fakeEmbeddings, new PgVectorRepository(db, 'test-1536'));
+const rag = new RagService(
+  db,
+  fakeEmbeddings,
+  new PgVectorRepository(db, `test-1536-${randomUUID()}`),
+);
 
 after(async () => db.$disconnect());
 
-test('indexing checkpoint avoids duplicate embeddings and search stays scoped', async () => {
+test('indexing checkpoint avoids duplicate embeddings and search spans chats', async () => {
   const chatId = String(BigInt(`8${Date.now()}`));
   const other = String(BigInt(`9${Date.now()}`));
 
@@ -58,11 +63,16 @@ test('indexing checkpoint avoids duplicate embeddings and search stays scoped', 
   await rag.indexChat(chatId);
 
   assert.equal(embedded, 1);
-  assert.deepEqual(
-    (await rag.searchRelevantContext(chatId, 'conversation', 5)).map((item) => item.chatId),
-    [chatId],
+  assert.ok(
+    (await rag.searchRelevantContext(chatId, 'conversation', 10)).some(
+      (item) => item.chatId === chatId,
+    ),
   );
-  assert.deepEqual(await rag.searchRelevantContext(other, 'conversation', 5), []);
+  assert.ok(
+    (await rag.searchRelevantContext(other, 'conversation', 10)).some(
+      (item) => item.chatId === chatId,
+    ),
+  );
 
   await rag.indexChat(chatId);
 
@@ -97,7 +107,11 @@ test('backfill persists old history and reindexes without reply operations', asy
 
   assert.equal((await store.checkpoint(chatId)).complete, true);
   assert.equal(await db.replyOperation.count({ where: { chatId } }), 0);
-  assert.equal((await rag.searchRelevantContext(chatId, 'historical', 5)).length, 1);
+  assert.ok(
+    (await rag.searchRelevantContext(chatId, 'historical', 10)).some(
+      (item) => item.chatId === chatId,
+    ),
+  );
 });
 
 test('catch-up resumes from a known Telegram ID without historical replies', async () => {

@@ -160,7 +160,7 @@ test('policy repository failure is closed', async () => {
   assert.equal(await policy.canIngest('1'), false);
   assert.equal(await policy.canSend('1', 1, false), false);
 });
-test('retrieval outage falls back to recent messages and cannot leak another chat', async () => {
+test('retrieval outage falls back to recent messages and other-chat memories are allowed', async () => {
   const f = fixture();
 
   f.store.paused = false;
@@ -176,11 +176,14 @@ test('retrieval outage falls back to recent messages and cannot leak another cha
 
   const hostile = new ContextBuilder(f.store, f.policy, {
     searchRelevantContext: async () => [
-      { id: 'x', chatId: 'other', content: 'secret', messageIds: ['9'], score: 1 },
+      { id: 'x', chatId: 'other', content: 'writing style', messageIds: ['1'], score: 1 },
     ],
   });
 
-  assert.deepEqual((await hostile.buildContext('1', '1')).retrievedMemories, []);
+  const context = await hostile.buildContext('1', '1');
+
+  assert.equal(context.retrievedMemories[0]?.chatId, 'other');
+  assert.ok(context.recentMessages.every((message) => message.chatId === '1'));
 });
 test('hourly limit denies subsequent sends', async () => {
   const f = fixture();

@@ -9,11 +9,11 @@ const databaseUrl = process.env.TEST_DATABASE_URL;
 if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required');
 
 const db = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
-const vectors = new PgVectorRepository(db, 'test-1536');
+const vectors = new PgVectorRepository(db, `test-1536-${randomUUID()}`);
 
 after(async () => db.$disconnect());
 
-test('pgvector upsert is idempotent and search is scoped to one chat', async () => {
+test('pgvector upsert is idempotent and search spans chats', async () => {
   const a = String(BigInt(`5${Date.now()}`));
   const b = String(BigInt(`6${Date.now()}`));
 
@@ -40,12 +40,16 @@ test('pgvector upsert is idempotent and search is scoped to one chat', async () 
 
   assert.equal(await db.conversationChunk.count({ where: { chatId: a } }), 1);
   assert.deepEqual(
-    (await vectors.search(a, first, 5)).map((row) => row.content),
+    (await vectors.search(first, 1)).map((row) => row.content),
     ['alpha'],
   );
   assert.deepEqual(
-    (await vectors.search(b, second, 5)).map((row) => row.content),
+    (await vectors.search(second, 1)).map((row) => row.content),
     ['beta'],
   );
-  await assert.rejects(vectors.search(a, [1], 5));
+  assert.deepEqual(
+    new Set((await vectors.search(first, 2)).map((row) => row.chatId)),
+    new Set([a, b]),
+  );
+  await assert.rejects(vectors.search([1], 5));
 });

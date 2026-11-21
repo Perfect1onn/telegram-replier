@@ -66,11 +66,7 @@ export class PgVectorRepository {
       updated_at = now()`;
   }
 
-  async search(
-    chatId: string,
-    vector: readonly number[],
-    limit: number,
-  ): Promise<RetrievedChunk[]> {
+  async search(vector: readonly number[], limit: number): Promise<RetrievedChunk[]> {
     if (!Number.isInteger(limit) || limit < 1 || limit > 10)
       throw new Error('Invalid search limit');
 
@@ -78,7 +74,7 @@ export class PgVectorRepository {
       SELECT id::text, chat_id, content, message_ids,
         1 - (embedding <=> ${vectorLiteral(vector)}::vector) AS score
       FROM conversation_chunks
-      WHERE chat_id = ${chatId} AND status = 'FINALIZED'
+      WHERE status = 'FINALIZED'
         AND embedding_model = ${this.model} AND embedding IS NOT NULL
       ORDER BY embedding <=> ${vectorLiteral(vector)}::vector
       LIMIT ${limit}`;

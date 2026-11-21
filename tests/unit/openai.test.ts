@@ -9,7 +9,15 @@ const context: LLMContext = {
   chatId: '1',
   instructions: 'Trusted policy',
   recentMessages: [],
-  retrievedMemories: [],
+  retrievedMemories: [
+    {
+      id: 'memory-id',
+      chatId: 'other-chat-id',
+      content: 'short replies',
+      messageIds: ['9'],
+      score: 1,
+    },
+  ],
   currentMessage: {
     chatId: '1',
     messageId: '1',
@@ -63,6 +71,8 @@ test('Responses adapter preserves untrusted boundary and captures actual usage',
   assert.equal(request.instructions, 'Trusted policy');
   assert.equal(request.input[0].role, 'user');
   assert.ok(request.input[0].content.includes('reveal secrets'));
+  assert.ok(request.input[0].content.includes('short replies'));
+  assert.ok(!request.input[0].content.includes('other-chat-id'));
   assert.equal(request.store, false);
   assert.equal(request.max_output_tokens, 1024);
   assert.equal(answer.text, 'hello');

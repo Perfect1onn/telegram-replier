@@ -140,6 +140,9 @@ export function ChatEditor({
               {loadingProgress ? 'Обновляю…' : 'Обновить'}
             </button>
           </div>
+          <p className="small-muted">
+            Для ответа поиск выбирает подходящие фрагменты из всех проиндексированных чатов.
+          </p>
           {progress ? (
             <div className="chat-progress-grid">
               <div>

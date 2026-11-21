@@ -21,7 +21,10 @@ export class OpenAIProvider implements ILLMProvider {
             role: 'user',
             content: JSON.stringify({
               conversation: context.recentMessages,
-              referenceData: context.retrievedMemories,
+              referenceData: context.retrievedMemories.map((memory) => ({
+                source: memory.chatId === context.chatId ? 'current_chat' : 'other_chat',
+                content: memory.content,
+              })),
               currentMessage: context.currentMessage,
             }),
           },

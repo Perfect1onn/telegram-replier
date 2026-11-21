@@ -142,9 +142,14 @@ test('config version change during generation prevents dispatch', async () => {
 test('backfill persists history without reply jobs', async () => {
   const f = fixture();
 
-  f.gateway.history = [f.message(1), f.message(2)];
+  f.gateway.history = [
+    { ...f.message(1), occurredAt: new Date(Date.now() - 86400000) },
+    { ...f.message(2), occurredAt: new Date() },
+    { ...f.message(3), occurredAt: new Date(Date.now() - 184 * 86400000) },
+  ];
   await new Synchronizer(f.store, f.policy, f.gateway).backfillChat('1');
   assert.equal(f.store.messages.get('1')?.size, 2);
+  assert.equal((await f.store.checkpoint('1')).complete, true);
   assert.equal(f.store.operations.size, 0);
 });
 test('policy repository failure is closed', async () => {
@@ -174,15 +179,31 @@ test('retrieval outage falls back to recent messages and other-chat memories are
 
   assert.deepEqual((await failed.buildContext('1', '1')).retrievedMemories, []);
 
-  const hostile = new ContextBuilder(f.store, f.policy, {
-    searchRelevantContext: async () => [
-      { id: 'x', chatId: 'other', content: 'writing style', messageIds: ['1'], score: 1 },
-    ],
-  });
+  const hostile = new ContextBuilder(
+    f.store,
+    f.policy,
+    {
+      searchRelevantContext: async () => [
+        { id: 'x', chatId: 'other', content: 'writing style', messageIds: ['1'], score: 1 },
+      ],
+      searchOwnerExamples: async () => ['ну да, ок?', 'ага :)'],
+    },
+    {
+      getChatSummary: async () => 'За шесть месяцев обсуждали проект.',
+      getProfile: async () => ({
+        about: 'Разработчик',
+        style: 'Коротко и без заглавных букв',
+        boundaries: 'Не раскрывать чужие данные',
+      }),
+    },
+  );
 
   const context = await hostile.buildContext('1', '1');
 
   assert.equal(context.retrievedMemories[0]?.chatId, 'other');
+  assert.equal(context.chatSummary, 'За шесть месяцев обсуждали проект.');
+  assert.deepEqual(context.ownerExamples, ['ну да, ок?', 'ага :)']);
+  assert.equal(context.ownerProfile?.about, 'Разработчик');
   assert.ok(context.recentMessages.every((message) => message.chatId === '1'));
 });
 test('hourly limit denies subsequent sends', async () => {

@@ -4,6 +4,7 @@ import { after, test } from 'node:test';
 import { PrismaClient } from '@prisma/client';
 import { createAdminApi } from '../../src/infrastructure/admin/admin-api.ts';
 import { PrismaWorkflowStore } from '../../src/infrastructure/persistence/prisma-workflow.store.ts';
+import { PersonalMemory } from '../../src/infrastructure/persistence/personal-memory.ts';
 import { PolicyEngine } from '../../src/application/policy-engine.ts';
 import { OutboundDispatcher } from '../../src/application/outbound-dispatcher.ts';
 import { FakeGateway } from '../../src/infrastructure/testing/fakes.ts';
@@ -169,6 +170,32 @@ test('admin API requires signed-key JWT auth and versioned chat updates', async 
     200,
   );
   assert.equal((await app.inject({ method: 'GET', url, headers })).statusCode, 404);
+});
+
+test('personal questionnaire is JWT protected and validated', async () => {
+  const url = '/api/profile';
+  const headers = await authHeaders();
+
+  assert.equal((await app.inject({ method: 'GET', url })).statusCode, 401);
+  assert.equal(
+    (await app.inject({ method: 'PUT', url, headers, payload: { about: 'incomplete' } }))
+      .statusCode,
+    400,
+  );
+
+  const payload = {
+    name: 'Perf',
+    about: 'Люблю короткие ответы',
+    work: 'Разработчик',
+    interests: 'Музыка',
+    style: 'пишу без точек',
+    boundaries: 'Не переносить чужие личные детали',
+  };
+  const result = await app.inject({ method: 'PUT', url, headers, payload });
+
+  assert.equal(result.statusCode, 200);
+  assert.equal((await app.inject({ method: 'GET', url, headers })).json().name, payload.name);
+  assert.equal((await new PersonalMemory(db).getProfile()).about.includes('Разработчик'), true);
 });
 
 test('explicit draft approval sends only through the dispatcher', async () => {

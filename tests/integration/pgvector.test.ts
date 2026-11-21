@@ -18,6 +18,28 @@ test('pgvector upsert is idempotent and search spans chats', async () => {
   const b = String(BigInt(`6${Date.now()}`));
 
   await db.allowedChat.createMany({ data: [{ chatId: a }, { chatId: b }] });
+  await db.message.createMany({
+    data: [
+      {
+        chatId: a,
+        messageId: '1',
+        senderId: '1',
+        direction: 'OUTGOING',
+        source: 'TELEGRAM',
+        text: 'Мой стиль?',
+        occurredAt: new Date(),
+      },
+      {
+        chatId: b,
+        messageId: '2',
+        senderId: '2',
+        direction: 'INCOMING',
+        source: 'TELEGRAM',
+        text: 'Не мой стиль',
+        occurredAt: new Date(),
+      },
+    ],
+  });
 
   const first = new Array<number>(1536).fill(0);
   const second = new Array<number>(1536).fill(0);
@@ -50,6 +72,12 @@ test('pgvector upsert is idempotent and search spans chats', async () => {
   assert.deepEqual(
     new Set((await vectors.search(first, 2)).map((row) => row.chatId)),
     new Set([a, b]),
+  );
+  assert.deepEqual(
+    (await vectors.searchOwner(first, 2, new Date(Date.now() - 183 * 86400000))).map(
+      (row) => row.chatId,
+    ),
+    [a],
   );
   await assert.rejects(vectors.search([1], 5));
 });

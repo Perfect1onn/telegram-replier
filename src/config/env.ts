@@ -126,7 +126,7 @@ export function loadSettings(
     databaseUrl: url('DATABASE_URL', ['postgres:', 'postgresql:']),
     redisUrl: url('REDIS_URL', ['redis:', 'rediss:']),
     workerConcurrency: integer('WORKER_CONCURRENCY', 2, 1, 16),
-    retentionDays: integer('RETENTION_DAYS', 30, 1, 365),
+    retentionDays: integer('RETENTION_DAYS', 183, 183, 365),
     dailyBudgetUsd: money('LLM_DAILY_BUDGET_USD'),
     prices: {
       input: money('LLM_INPUT_USD_PER_MILLION'),

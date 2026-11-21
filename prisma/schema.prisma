@@ -190,3 +190,29 @@ model IndexingState {
 
   @@map("indexing_state")
 }
+
+model ChatSummary {
+  chatId          String    @id @map("chat_id")
+  since           DateTime  @db.Timestamptz
+  cursorAt        DateTime? @map("cursor_at") @db.Timestamptz
+  cursorMessageId String?   @map("cursor_message_id")
+  content         String    @default("")
+  processed       Int       @default(0)
+  status          String    @default("PENDING")
+  updatedAt       DateTime  @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@map("chat_summaries")
+}
+
+model OwnerProfile {
+  id             Int      @id
+  name           String   @default("")
+  about          String   @default("")
+  work           String   @default("")
+  interests      String   @default("")
+  style          String   @default("")
+  boundaries     String   @default("")
+  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@map("owner_profile")
+}

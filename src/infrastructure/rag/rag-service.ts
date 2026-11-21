@@ -35,7 +35,72 @@ export class RagService implements IRagService {
 
     const vector = await this.embeddings.embedQuery(query);
 
-    return this.vectors.search(vector, limit);
+    const chunks = await this.vectors.search(vector, 10);
+    const selected: RetrievedChunk[] = [];
+    const since = new Date(Date.now() - 183 * 86400000);
+
+    for (const chunk of chunks) {
+      if (chunk.chatId === chatId) {
+        selected.push(chunk);
+      } else {
+        const ownerMessages = await this.db.message.findMany({
+          where: {
+            chatId: chunk.chatId,
+            messageId: { in: chunk.messageIds },
+            direction: 'OUTGOING',
+            source: 'TELEGRAM',
+            occurredAt: { gte: since },
+          },
+          orderBy: { occurredAt: 'asc' },
+        });
+
+        if (ownerMessages.length)
+          selected.push({
+            ...chunk,
+            content: ownerMessages.map((message) => message.text).join('\n'),
+            messageIds: ownerMessages.map((message) => message.messageId),
+          });
+      }
+
+      if (selected.length >= limit) break;
+    }
+
+    return selected;
+  }
+
+  async searchOwnerExamples(query: string, limit: number): Promise<string[]> {
+    if (!query.trim()) return [];
+
+    if (!Number.isInteger(limit) || limit < 1 || limit > 6)
+      throw new Error('Invalid example limit');
+
+    const vector = await this.embeddings.embedQuery(query);
+    const since = new Date(Date.now() - 183 * 86400000);
+    const chunks = await this.vectors.searchOwner(vector, 10, since);
+    const examples: string[] = [];
+
+    for (const chunk of chunks) {
+      const messages = await this.db.message.findMany({
+        where: {
+          chatId: chunk.chatId,
+          messageId: { in: chunk.messageIds },
+          direction: 'OUTGOING',
+          source: 'TELEGRAM',
+          occurredAt: { gte: since },
+        },
+        orderBy: { occurredAt: 'asc' },
+      });
+
+      for (const message of messages) {
+        if (!message.text.trim() || examples.includes(message.text)) continue;
+
+        examples.push(message.text.slice(0, 1000));
+
+        if (examples.length >= limit) return examples;
+      }
+    }
+
+    return examples;
   }
 
   async indexChat(chatId: string): Promise<void> {

@@ -56,6 +56,7 @@ export interface IWorkflowStore extends IChatAdminService, IMessageRepository {
     model: string,
     maxInputTokens: number,
     pricing: UsagePricing,
+    maxOutputTokens?: number,
   ): Promise<string | null>;
   completeUsage(id: string, answer: Answer, pricing: UsagePricing): Promise<void>;
   unknownUsage(id: string): Promise<void>;
@@ -85,6 +86,12 @@ export interface ILLMProvider {
 
 export interface IRagService {
   searchRelevantContext(chatId: string, query: string, limit: number): Promise<RetrievedChunk[]>;
+  searchOwnerExamples?(query: string, limit: number): Promise<string[]>;
+}
+
+export interface IPersonalMemory {
+  getChatSummary(chatId: string): Promise<string>;
+  getProfile(): Promise<{ about: string; style: string; boundaries: string }>;
 }
 
 export interface IEmbeddingService {

@@ -102,18 +102,22 @@ export class PrismaWorkflowStore implements IWorkflowStore {
     model: string,
     maxInputTokens: number,
     pricing: UsagePricing,
+    maxOutputTokens = 1024,
   ): Promise<string | null> {
     if (
       !Number.isSafeInteger(maxInputTokens) ||
       maxInputTokens < 1 ||
       maxInputTokens > 200000 ||
+      !Number.isSafeInteger(maxOutputTokens) ||
+      maxOutputTokens < 1 ||
+      maxOutputTokens > 4096 ||
       !Number.isFinite(pricing.dailyBudgetUsd) ||
       pricing.dailyBudgetUsd <= 0
     )
       return null;
 
     const reservedCost = estimateCost(
-      { inputTokens: maxInputTokens, outputTokens: 1024, cachedInputTokens: 0 },
+      { inputTokens: maxInputTokens, outputTokens: maxOutputTokens, cachedInputTokens: 0 },
       pricing.prices,
     );
     const now = new Date();
@@ -232,6 +236,7 @@ export class PrismaWorkflowStore implements IWorkflowStore {
       await tx.jobOutbox.deleteMany({ where: { chatId } });
       await tx.conversationChunk.deleteMany({ where: { chatId } });
       await tx.indexingState.deleteMany({ where: { chatId } });
+      await tx.chatSummary.deleteMany({ where: { chatId } });
       await tx.syncCheckpoint.deleteMany({ where: { chatId } });
       await tx.llmUsage.deleteMany({ where: { chatId } });
       await tx.message.deleteMany({ where: { chatId } });
@@ -243,9 +248,14 @@ export class PrismaWorkflowStore implements IWorkflowStore {
     });
   }
 
-  async enqueueBackfill(chatId: string): Promise<string> {
+  async enqueueBackfill(chatId: string, restart = false): Promise<string> {
     return this.db.$transaction(async (tx) => {
       await this.lockChat(tx, chatId);
+
+      if (restart) {
+        await tx.syncCheckpoint.deleteMany({ where: { chatId, kind: 'BACKFILL' } });
+        await tx.chatSummary.deleteMany({ where: { chatId } });
+      }
 
       const id = randomUUID();
       const generation = BigInt(`0x${randomBytes(7).toString('hex')}`);

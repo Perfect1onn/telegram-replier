@@ -15,6 +15,7 @@ export class Synchronizer {
   async backfillChat(chatId: string): Promise<boolean> {
     let checkpoint = await this.store.checkpoint(chatId);
     let changed = false;
+    const since = new Date(Date.now() - 183 * 86400000);
 
     while (!checkpoint.complete) {
       if (!(await this.policy.canIngest(chatId))) throw new AccessDeniedError();
@@ -26,12 +27,16 @@ export class Synchronizer {
 
       if (page.items.some((m) => m.chatId !== chatId)) throw new AccessDeniedError();
 
-      changed ||= page.items.length > 0;
+      const items = page.items.filter((message) => message.occurredAt >= since);
+      const reachedCutoff = items.length < page.items.length;
 
-      checkpoint = page.nextCursor
-        ? { cursor: page.nextCursor, complete: false }
-        : { complete: true };
-      await this.store.saveHistory(chatId, page.items, checkpoint);
+      changed ||= items.length > 0;
+
+      checkpoint =
+        page.nextCursor && !reachedCutoff
+          ? { cursor: page.nextCursor, complete: false }
+          : { complete: true };
+      await this.store.saveHistory(chatId, items, checkpoint);
     }
 
     return changed;

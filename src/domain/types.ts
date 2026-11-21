@@ -63,6 +63,9 @@ export interface LLMContext {
   instructions: string;
   recentMessages: ChatMessage[];
   retrievedMemories: RetrievedChunk[];
+  chatSummary?: string;
+  ownerProfile?: { about: string; style: string; boundaries: string };
+  ownerExamples?: string[];
   currentMessage: ChatMessage;
 }
 

@@ -6,12 +6,14 @@ import { loadSettings } from './config/env.ts';
 import { PolicyEngine } from './application/policy-engine.ts';
 import { MessageIngestionService } from './application/message-ingestion.service.ts';
 import { ContextBuilder } from './application/context-builder.ts';
+import { ChatSummaryService } from './application/chat-summary-service.ts';
 import { AIService } from './application/ai.service.ts';
 import { OutboundDispatcher } from './application/outbound-dispatcher.ts';
 import { ReplyProcessor } from './application/reply-processor.ts';
 import { TelegramReplier } from './application/telegram-replier.ts';
 import { Synchronizer } from './application/synchronizer.ts';
 import { PrismaWorkflowStore } from './infrastructure/persistence/prisma-workflow.store.ts';
+import { PersonalMemory } from './infrastructure/persistence/personal-memory.ts';
 import { RetentionService } from './infrastructure/persistence/retention.ts';
 import { TeleprotoGateway } from './infrastructure/telegram/teleproto.gateway.ts';
 import { GatewayLease } from './infrastructure/telegram/gateway-lease.ts';
@@ -39,6 +41,8 @@ async function main(): Promise<void> {
   let sweeping: Promise<void> | null = null;
   let retentionTimer: ReturnType<typeof setInterval> | null = null;
   let retaining: Promise<void> | null = null;
+  let summaryTimer: ReturnType<typeof setInterval> | null = null;
+  let summarizing: Promise<void> | null = null;
 
   const shutdown = async (): Promise<void> => {
     if (stopping) return;
@@ -50,10 +54,14 @@ async function main(): Promise<void> {
 
     if (retentionTimer) clearInterval(retentionTimer);
 
+    if (summaryTimer) clearInterval(summaryTimer);
+
     idleTimer = null;
     retentionTimer = null;
+    summaryTimer = null;
     await sweeping;
     await retaining;
+    await summarizing;
 
     const results = await Promise.allSettled([
       replier?.stop(10000),
@@ -100,6 +108,13 @@ async function main(): Promise<void> {
       new OpenAIEmbeddings(client, settings.embeddingModel),
       new PgVectorRepository(db, settings.embeddingModel),
     );
+    const pricing = {
+      prices: settings.prices,
+      version: settings.priceVersion,
+      effectiveAt: settings.priceEffectiveAt,
+      dailyBudgetUsd: settings.dailyBudgetUsd,
+    };
+    const summaries = new ChatSummaryService(db, store, client, settings.model, pricing);
     const gateway = new TeleprotoGateway(
       {
         apiId: settings.telegramApiId,
@@ -114,15 +129,10 @@ async function main(): Promise<void> {
     const processor = new ReplyProcessor({
       store,
       policy,
-      context: new ContextBuilder(store, policy, rag),
+      context: new ContextBuilder(store, policy, rag, new PersonalMemory(db)),
       ai: new AIService(new OpenAIProvider(client, settings.model)),
       dispatcher,
-      pricing: {
-        prices: settings.prices,
-        version: settings.priceVersion,
-        effectiveAt: settings.priceEffectiveAt,
-        dailyBudgetUsd: settings.dailyBudgetUsd,
-      },
+      pricing,
       model: settings.model,
     });
     const ingestion = new MessageIngestionService(policy, store);
@@ -229,6 +239,21 @@ async function main(): Promise<void> {
 
     sweepRetention();
     retentionTimer = setInterval(sweepRetention, 86400000);
+
+    const sweepSummaries = (): void => {
+      if (summarizing || stopping) return;
+
+      summarizing = summaries
+        .step()
+        .then(() => undefined)
+        .catch(() => logger.error({ event: 'summary_step_failed' }))
+        .finally(() => {
+          summarizing = null;
+        });
+    };
+
+    sweepSummaries();
+    summaryTimer = setInterval(sweepSummaries, 60000);
 
     logger.info({ event: 'ready', autoReplyEnabled: settings.autoreplyEnabled });
 

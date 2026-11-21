@@ -29,6 +29,36 @@ function validUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }
 
+interface ProfileInput {
+  name: string;
+  about: string;
+  work: string;
+  interests: string;
+  style: string;
+  boundaries: string;
+}
+
+function validProfile(value: unknown): value is ProfileInput {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+
+  const row = value as Record<string, unknown>;
+  const maxLengths: Record<keyof ProfileInput, number> = {
+    name: 200,
+    about: 4000,
+    work: 2000,
+    interests: 2000,
+    style: 2000,
+    boundaries: 2000,
+  };
+
+  return (
+    Object.keys(row).every((key) => key in maxLengths) &&
+    Object.entries(maxLengths).every(
+      ([key, max]) => typeof row[key] === 'string' && row[key].length <= max,
+    )
+  );
+}
+
 export function createAdminApi(options: AdminOptions): FastifyInstance {
   const auth = new AdminAuth(options.publicKeyPem, options.jwtSecret);
   const requests = new Map<string, { start: number; count: number }>();
@@ -215,14 +245,20 @@ export function createAdminApi(options: AdminOptions): FastifyInstance {
     return chat;
   });
 
-  app.post<{ Params: { chatId: string } }>(
+  app.post<{ Params: { chatId: string }; Body?: { restart?: boolean } }>(
     '/api/chats/:chatId/backfill',
     async (request, reply) => {
       const { chatId } = request.params;
+      const body = request.body ?? {};
 
-      if (!validChatId(chatId)) return reply.code(400).send({ error: 'Invalid request' });
+      if (
+        !validChatId(chatId) ||
+        Object.keys(body).some((key) => key !== 'restart') ||
+        (body.restart !== undefined && typeof body.restart !== 'boolean')
+      )
+        return reply.code(400).send({ error: 'Invalid request' });
 
-      const id = await options.store.enqueueBackfill(chatId);
+      const id = await options.store.enqueueBackfill(chatId, body.restart ?? false);
 
       return reply.code(202).send({ jobId: id });
     },
@@ -245,7 +281,7 @@ export function createAdminApi(options: AdminOptions): FastifyInstance {
 
     if (!(await options.store.getChat(chatId))) return reply.code(404).send({ error: 'Not found' });
 
-    const [history, storedMessages, index, chunks] = await Promise.all([
+    const [history, storedMessages, index, chunks, summary] = await Promise.all([
       options.db.syncCheckpoint.findUnique({
         where: { chatId_kind: { chatId, kind: 'BACKFILL' } },
         select: { state: true, lastSuccessAt: true, updatedAt: true },
@@ -263,6 +299,10 @@ export function createAdminApi(options: AdminOptions): FastifyInstance {
         LEFT JOIN messages m ON m.chat_id = c.chat_id AND m.message_id = member.message_id
         WHERE c.chat_id = ${chatId} AND c.status = 'FINALIZED'
           AND c.embedding_model = ${options.embeddingModel} AND c.embedding IS NOT NULL`,
+      options.db.chatSummary.findUnique({
+        where: { chatId },
+        select: { status: true, processed: true, since: true, updatedAt: true },
+      }),
     ]);
 
     return {
@@ -276,7 +316,44 @@ export function createAdminApi(options: AdminOptions): FastifyInstance {
       indexedChunks: Number(chunks[0]?.indexed_chunks ?? 0),
       bufferedMessages: index?.openIds.length ?? 0,
       indexUpdatedAt: index?.updatedAt ?? null,
+      summary: summary ?? { status: 'NOT_STARTED', processed: 0, since: null, updatedAt: null },
     };
+  });
+
+  app.get('/api/profile', async () => {
+    const profile = await options.db.ownerProfile.findUnique({ where: { id: 1 } });
+
+    return {
+      name: profile?.name ?? '',
+      about: profile?.about ?? '',
+      work: profile?.work ?? '',
+      interests: profile?.interests ?? '',
+      style: profile?.style ?? '',
+      boundaries: profile?.boundaries ?? 'Не раскрывать секреты и личные сведения собеседников.',
+      updatedAt: profile?.updatedAt ?? null,
+    };
+  });
+
+  app.put<{ Body: unknown }>('/api/profile', async (request, reply) => {
+    const body = request.body;
+
+    if (!validProfile(body)) return reply.code(400).send({ error: 'Invalid request' });
+
+    const data = {
+      name: body.name,
+      about: body.about,
+      work: body.work,
+      interests: body.interests,
+      style: body.style,
+      boundaries: body.boundaries,
+    };
+    const profile = await options.db.ownerProfile.upsert({
+      where: { id: 1 },
+      create: { id: 1, ...data },
+      update: { ...data, updatedAt: new Date() },
+    });
+
+    return { ...data, updatedAt: profile.updatedAt };
   });
 
   app.put<{ Params: { chatId: string }; Body: { expectedVersion?: number; patch?: ChatPatch } }>(

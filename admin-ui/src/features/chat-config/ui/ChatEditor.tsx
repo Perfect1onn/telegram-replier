@@ -36,12 +36,12 @@ export function ChatEditor({
   }, [chat.chatId]);
 
   useEffect(() => {
-    if (progress?.history.state !== 'PENDING') return;
+    if (progress?.history.state !== 'PENDING' && progress?.summary.status !== 'PENDING') return;
 
     const timer = setInterval(() => void loadProgress(), 10000);
 
     return () => clearInterval(timer);
-  }, [chat.chatId, progress?.history.state]);
+  }, [chat.chatId, progress?.history.state, progress?.summary.status]);
 
   async function save(event: FormEvent) {
     event.preventDefault();
@@ -78,10 +78,17 @@ export function ChatEditor({
 
   async function queueBackfill() {
     if (!canBackfill) return;
-    if (!confirm(`Загрузить историю чата ${chat.chatId}?`)) return;
+    const restart = progress?.history.state === 'COMPLETE';
+    if (
+      !confirm(
+        `${restart ? 'Повторно загрузить последние 6 месяцев' : 'Загрузить историю'} чата ${chat.chatId}?`,
+      )
+    )
+      return;
     try {
       const result = await request<{ jobId: string }>(`/api/chats/${chat.chatId}/backfill`, {
         method: 'POST',
+        body: { restart },
       });
       setBackfill(`Задача ${result.jobId} добавлена`);
       void loadProgress();
@@ -175,6 +182,19 @@ export function ChatEditor({
                   {progress.indexedChunks.toLocaleString('ru-RU')} фрагментов
                   {progress.bufferedMessages ? ` · ${progress.bufferedMessages} в буфере` : ''}
                 </small>
+              </div>
+              <div>
+                <span>Сводка за 6 месяцев</span>
+                <strong>
+                  {progress.summary.status === 'COMPLETE'
+                    ? 'Готова'
+                    : progress.summary.status === 'BUDGET'
+                      ? 'Ожидает дневного лимита'
+                      : progress.summary.status === 'PENDING'
+                        ? 'Составляется'
+                        : 'Не начата'}
+                </strong>
+                <small>{progress.summary.processed.toLocaleString('ru-RU')} сообщений учтено</small>
               </div>
             </div>
           ) : (
@@ -283,7 +303,7 @@ export function ChatEditor({
               disabled={!canBackfill || busy}
               onClick={() => void queueBackfill()}
             >
-              Загрузить историю
+              {progress?.history.state === 'COMPLETE' ? 'Обновить 6 месяцев' : 'Загрузить историю'}
             </button>
             <button className="primary" disabled={busy}>
               Сохранить

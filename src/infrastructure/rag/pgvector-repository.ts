@@ -87,4 +87,36 @@ export class PgVectorRepository {
       score: row.score,
     }));
   }
+
+  async searchOwner(
+    vector: readonly number[],
+    limit: number,
+    since: Date,
+  ): Promise<RetrievedChunk[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 10 || !Number.isFinite(since.getTime()))
+      throw new Error('Invalid owner search');
+
+    const rows = await this.db.$queryRaw<VectorRow[]>`
+      SELECT c.id::text, c.chat_id, c.content, c.message_ids,
+        1 - (c.embedding <=> ${vectorLiteral(vector)}::vector) AS score
+      FROM conversation_chunks c
+      WHERE c.status = 'FINALIZED' AND c.embedding_model = ${this.model}
+        AND c.embedding IS NOT NULL
+        AND EXISTS (
+          SELECT 1 FROM messages m
+          WHERE m.chat_id = c.chat_id AND m.message_id = ANY(c.message_ids)
+            AND m.direction = 'OUTGOING' AND m.source = 'TELEGRAM'
+            AND m.occurred_at >= ${since}
+        )
+      ORDER BY c.embedding <=> ${vectorLiteral(vector)}::vector
+      LIMIT ${limit}`;
+
+    return rows.map((row) => ({
+      id: row.id,
+      chatId: row.chat_id,
+      content: row.content,
+      messageIds: row.message_ids,
+      score: row.score,
+    }));
+  }
 }

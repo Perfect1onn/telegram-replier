@@ -21,4 +21,10 @@ export interface ChatProgress {
   indexedChunks: number;
   bufferedMessages: number;
   indexUpdatedAt: string | null;
+  summary: {
+    status: 'NOT_STARTED' | 'PENDING' | 'BUDGET' | 'COMPLETE';
+    processed: number;
+    since: string | null;
+    updatedAt: string | null;
+  };
 }

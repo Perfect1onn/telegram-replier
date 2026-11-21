@@ -53,10 +53,21 @@ test('indexing checkpoint avoids duplicate embeddings and search spans chats', a
       chatId,
       messageId: '1',
       senderId: chatId,
-      direction: 'INCOMING',
+      direction: 'OUTGOING',
       source: 'TELEGRAM',
       text: 'old conversation',
       occurredAt: new Date(Date.now() - 3600000),
+    },
+  });
+  await db.message.create({
+    data: {
+      chatId,
+      messageId: '2',
+      senderId: other,
+      direction: 'INCOMING',
+      source: 'TELEGRAM',
+      text: 'private detail from contact',
+      occurredAt: new Date(Date.now() - 3540000),
     },
   });
 
@@ -68,18 +79,20 @@ test('indexing checkpoint avoids duplicate embeddings and search spans chats', a
       (item) => item.chatId === chatId,
     ),
   );
-  assert.ok(
-    (await rag.searchRelevantContext(other, 'conversation', 10)).some(
-      (item) => item.chatId === chatId,
-    ),
-  );
+
+  const crossChat = await rag.searchRelevantContext(other, 'conversation', 10);
+
+  assert.ok(crossChat.some((item) => item.chatId === chatId));
+  assert.ok(crossChat.some((item) => item.content.includes('old conversation')));
+  assert.ok(crossChat.every((item) => !item.content.includes('private detail from contact')));
+  assert.deepEqual(await rag.searchOwnerExamples('conversation', 4), ['old conversation']);
 
   await rag.indexChat(chatId);
 
   assert.equal(embedded, 1);
   assert.equal(
     (await db.indexingState.findUniqueOrThrow({ where: { chatId } })).lastMessageId,
-    '1',
+    '2',
   );
 });
 

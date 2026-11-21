@@ -5,11 +5,13 @@ import { OverviewPage } from '../pages/overview/ui/OverviewPage';
 import { ChatsPage } from '../pages/chats/ui/ChatsPage';
 import { DraftsPage } from '../pages/drafts/ui/DraftsPage';
 import { SendsPage } from '../pages/sends/ui/SendsPage';
+import { ProfilePage } from '../pages/profile/ui/ProfilePage';
 
-type View = 'overview' | 'chats' | 'drafts' | 'sends';
+type View = 'overview' | 'chats' | 'profile' | 'drafts' | 'sends';
 const labels: Record<View, string> = {
   overview: 'Обзор',
   chats: 'Чаты',
+  profile: 'О тебе',
   drafts: 'Черновики',
   sends: 'Отправки',
 };
@@ -67,9 +69,12 @@ export function App() {
             >
               <span className="nav-symbol" aria-hidden="true">
                 {
-                  ({ overview: '◫', chats: '▤', drafts: '✎', sends: '◉' } as Record<View, string>)[
-                    item
-                  ]
+                  (
+                    { overview: '◫', chats: '▤', profile: '◇', drafts: '✎', sends: '◉' } as Record<
+                      View,
+                      string
+                    >
+                  )[item]
                 }
               </span>
               {labels[item]}
@@ -111,6 +116,7 @@ export function App() {
           )}
           {view === 'overview' && <OverviewPage {...props} />}
           {view === 'chats' && <ChatsPage {...props} />}
+          {view === 'profile' && <ProfilePage {...props} />}
           {view === 'drafts' && <DraftsPage {...props} />}
           {view === 'sends' && <SendsPage {...props} />}
         </div>

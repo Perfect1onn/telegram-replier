@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { randomBytes } from 'node:crypto';
+import { generateKeyPairSync, randomBytes, sign } from 'node:crypto';
 import { after, test } from 'node:test';
 import { PrismaClient } from '@prisma/client';
 import { createAdminApi } from '../../src/infrastructure/admin/admin-api.ts';
@@ -14,6 +14,8 @@ if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required');
 
 const db = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
 const token = randomBytes(32).toString('hex');
+const keyPair = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+const publicKeyPem = keyPair.publicKey.export({ type: 'spki', format: 'pem' }).toString();
 const store = new PrismaWorkflowStore(db);
 const adminGateway = new FakeGateway();
 const dispatcher = new OutboundDispatcher(
@@ -26,21 +28,50 @@ const app = createAdminApi({
   store,
   dispatcher,
   gateway: adminGateway,
-  token,
+  jwtSecret: token,
+  publicKeyPem,
   ready: async () => true,
 });
+
+async function authHeaders(target = app): Promise<{ authorization: string }> {
+  const challengeResponse = await target.inject({ method: 'POST', url: '/auth/challenge' });
+
+  assert.equal(challengeResponse.statusCode, 200);
+
+  const challenge = challengeResponse.json();
+  const signature = sign('sha256', Buffer.from(challenge.message), {
+    key: keyPair.privateKey,
+    dsaEncoding: 'ieee-p1363',
+  }).toString('base64url');
+  const response = await target.inject({
+    method: 'POST',
+    url: '/auth/verify',
+    payload: { id: challenge.id, signature },
+  });
+
+  assert.equal(response.statusCode, 200);
+
+  return { authorization: `Bearer ${response.json().token}` };
+}
 
 after(async () => {
   await app.close();
   await db.$disconnect();
 });
 
-test('admin API requires bearer auth and versioned chat updates', async () => {
+test('admin API requires signed-key JWT auth and versioned chat updates', async () => {
   const chatId = String(BigInt(`4${Date.now()}`));
   const url = `/api/chats/${chatId}`;
 
   assert.equal((await app.inject({ method: 'GET', url: '/health/live' })).statusCode, 200);
   assert.equal((await app.inject({ method: 'GET', url: '/health/ready' })).statusCode, 200);
+
+  const adminPage = await app.inject({ method: 'GET', url: '/admin/' });
+
+  assert.equal(adminPage.statusCode, 200);
+  assert.match(adminPage.headers['content-security-policy'] ?? '', /default-src 'none'/);
+  assert.match(adminPage.body, /Replier — управление/);
+  assert.match(adminPage.body, /assets\//);
   assert.equal((await app.inject({ method: 'GET', url })).statusCode, 401);
   assert.equal(
     (await app.inject({ method: 'GET', url, headers: { authorization: 'Bearer wrong' } }))
@@ -48,7 +79,7 @@ test('admin API requires bearer auth and versioned chat updates', async () => {
     401,
   );
 
-  const headers = { authorization: `Bearer ${token}` };
+  const headers = await authHeaders();
 
   assert.equal(
     (await app.inject({ method: 'GET', url: '/api/chats?limit=5', headers })).statusCode,
@@ -169,7 +200,8 @@ test('explicit draft approval sends only through the dispatcher', async () => {
   const approvalApi = createAdminApi({
     db,
     store,
-    token,
+    jwtSecret: token,
+    publicKeyPem,
     gateway,
     ready: async () => true,
     dispatcher: new OutboundDispatcher(store, new PolicyEngine(store, () => true), gateway),
@@ -179,7 +211,7 @@ test('explicit draft approval sends only through the dispatcher', async () => {
     const response = await approvalApi.inject({
       method: 'POST',
       url: `/api/drafts/${operation.id}/approve`,
-      headers: { authorization: `Bearer ${token}` },
+      headers: await authHeaders(approvalApi),
     });
 
     assert.equal(response.statusCode, 200);
@@ -193,7 +225,7 @@ test('explicit draft approval sends only through the dispatcher', async () => {
         await approvalApi.inject({
           method: 'POST',
           url: `/api/drafts/${operation.id}/approve`,
-          headers: { authorization: `Bearer ${token}` },
+          headers: await authHeaders(approvalApi),
         })
       ).statusCode,
       404,
@@ -242,7 +274,7 @@ test('UNKNOWN send requires explicit history-backed reconciliation', async () =>
 
   await store.finishSend(claim.id, null);
 
-  const headers = { authorization: `Bearer ${token}` };
+  const headers = await authHeaders();
   const url = `/api/sends/${claim.id}/reconcile`;
   const body = { outcome: 'SENT', telegramMessageId: '901', confirm: `RECONCILE ${claim.id}` };
 

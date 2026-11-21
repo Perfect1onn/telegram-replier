@@ -42,12 +42,14 @@ services:
       DATABASE_URL: postgresql://replier:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/telegram_replier
       REDIS_URL: redis://redis:6379
       TELEGRAM_SESSION_FILE: /run/telegram/session
+      ADMIN_PUBLIC_KEY_FILE: /run/admin/public.pem
       ADMIN_HOST: 0.0.0.0
       ADMIN_ALLOW_CONTAINER_BIND: "true"
       ADMIN_PORT: "8787"
       AUTOREPLY_ENABLED: "false"
     volumes:
       - ./.telegram-session:/run/telegram/session:ro
+      - ./.admin-public.pem:/run/admin/public.pem:ro
     ports:
       - "127.0.0.1:8787:8787"
     depends_on:

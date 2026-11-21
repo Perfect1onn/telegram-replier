@@ -1,5 +1,5 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
-import Fastify, { type FastifyInstance } from 'fastify';
+import { readFile } from 'node:fs/promises';
+import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import type { PrismaClient } from '@prisma/client';
 import { AccessDeniedError, ConflictError } from '../../domain/types.ts';
 import type { ChatPatch } from '../../application/chat-config.ts';
@@ -7,9 +7,12 @@ import { PrismaWorkflowStore } from '../persistence/prisma-workflow.store.ts';
 import { mapChat } from '../persistence/message.mapper.ts';
 import type { OutboundDispatcher } from '../../application/outbound-dispatcher.ts';
 import type { ITelegramGateway } from '../../ports/contracts.ts';
+import { AdminAuth } from './admin-auth.ts';
 
 interface AdminOptions {
-  token: string;
+  jwtSecret: string;
+  publicKeyPem: string;
+  autoreplyEnabled?: boolean;
   db: PrismaClient;
   store: PrismaWorkflowStore;
   dispatcher: OutboundDispatcher;
@@ -26,25 +29,21 @@ function validUuid(value: string): boolean {
 }
 
 export function createAdminApi(options: AdminOptions): FastifyInstance {
-  if (Buffer.byteLength(options.token) < 32) throw new Error('Invalid admin token');
-
-  const expected = createHash('sha256').update(options.token).digest();
+  const auth = new AdminAuth(options.publicKeyPem, options.jwtSecret);
   const requests = new Map<string, { start: number; count: number }>();
   const app = Fastify({ logger: false, bodyLimit: 16384, requestTimeout: 10000 });
 
   app.addHook('onRequest', async (request, reply) => {
-    if (request.url === '/health/live' || request.url === '/health/ready') return;
+    const path = request.url.split('?')[0] ?? '';
 
-    const supplied = request.headers.authorization;
-    const hash = createHash('sha256')
-      .update(supplied?.startsWith('Bearer ') ? supplied.slice(7) : '')
-      .digest();
-
-    if (!timingSafeEqual(expected, hash)) {
-      await reply.code(401).send({ error: 'Unauthorized' });
-
+    if (
+      path === '/health/live' ||
+      path === '/health/ready' ||
+      path === '/admin' ||
+      path === '/admin/' ||
+      /^\/admin\/assets\/[A-Za-z0-9._-]+$/.test(path)
+    )
       return;
-    }
 
     const now = Date.now();
     const current = requests.get(request.ip);
@@ -57,7 +56,14 @@ export function createAdminApi(options: AdminOptions): FastifyInstance {
 
     requests.set(request.ip, next);
 
-    if (next.count > 120) await reply.code(429).send({ error: 'Rate limit exceeded' });
+    if (next.count > 120) return reply.code(429).send({ error: 'Rate limit exceeded' });
+
+    if (path === '/auth/challenge' || path === '/auth/verify') return;
+
+    const supplied = request.headers.authorization;
+
+    if (!supplied?.startsWith('Bearer ') || !(await auth.accepts(supplied.slice(7))))
+      return reply.code(401).send({ error: 'Unauthorized' });
   });
 
   app.setErrorHandler((error, _request, reply) => {
@@ -78,6 +84,65 @@ export function createAdminApi(options: AdminOptions): FastifyInstance {
   });
 
   app.get('/health/live', async () => ({ live: true }));
+
+  app.get('/admin', async (_request, reply) => reply.redirect('/admin/'));
+
+  const sendAsset = async (filename: string, reply: FastifyReply) => {
+    const body = await readFile(new URL(`../../../admin-ui/dist/${filename}`, import.meta.url));
+    const contentType = filename.endsWith('.css')
+      ? 'text/css; charset=utf-8'
+      : filename.endsWith('.js')
+        ? 'text/javascript; charset=utf-8'
+        : 'text/html; charset=utf-8';
+
+    return reply
+      .header(
+        'Content-Security-Policy',
+        "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+      )
+      .header('X-Content-Type-Options', 'nosniff')
+      .header('Referrer-Policy', 'no-referrer')
+      .header('Cache-Control', 'no-store')
+      .type(contentType)
+      .send(body);
+  };
+
+  app.get('/admin/', async (_request, reply) => sendAsset('index.html', reply));
+  app.get<{ Params: { filename: string } }>('/admin/assets/:filename', async (request, reply) => {
+    if (!/^[A-Za-z0-9._-]+\.(js|css)$/.test(request.params.filename))
+      return reply.code(404).send({ error: 'Not found' });
+
+    return sendAsset(`assets/${request.params.filename}`, reply);
+  });
+
+  app.post('/auth/challenge', async (_request, reply) => {
+    try {
+      return auth.createChallenge();
+    } catch {
+      return reply.code(429).send({ error: 'Too many challenges' });
+    }
+  });
+
+  app.post<{ Body: { id?: string; signature?: string } }>(
+    '/auth/verify',
+    async (request, reply) => {
+      const { id, signature } = request.body ?? {};
+
+      if (
+        typeof id !== 'string' ||
+        typeof signature !== 'string' ||
+        !/^[0-9a-f-]{36}$/.test(id) ||
+        signature.length > 128
+      )
+        return reply.code(400).send({ error: 'Invalid request' });
+
+      const token = await auth.exchange(id, signature);
+
+      if (!token) return reply.code(401).send({ error: 'Unauthorized' });
+
+      return { token, expiresIn: 900 };
+    },
+  );
 
   app.get('/health/ready', async (_request, reply) => {
     try {
@@ -214,7 +279,12 @@ export function createAdminApi(options: AdminOptions): FastifyInstance {
       options.db.replyOperation.count({ where: { status: 'UNKNOWN' } }),
     ]);
 
-    return { paused: system?.paused ?? true, pendingOutbox, unknownSends };
+    return {
+      paused: system?.paused ?? true,
+      autoreplyEnabled: options.autoreplyEnabled ?? false,
+      pendingOutbox,
+      unknownSends,
+    };
   });
 
   app.get<{ Querystring: { limit?: string } }>('/api/sends/unknown', async (request, reply) => {

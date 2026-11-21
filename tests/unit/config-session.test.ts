@@ -10,7 +10,8 @@ import {
 } from '../../src/infrastructure/security/session-file.ts';
 
 const env = {
-  ADMIN_TOKEN: 'a'.repeat(64),
+  ADMIN_JWT_SECRET: 'a'.repeat(64),
+  ADMIN_PUBLIC_KEY_FILE: '.admin-public.pem',
   TELEGRAM_API_ID: '1',
   TELEGRAM_API_HASH: 'a'.repeat(32),
   TELEGRAM_EXPECTED_ACCOUNT_ID: '123',
@@ -31,7 +32,7 @@ test('config is immutable, paused by default and does not invent models', () => 
 test('reject unsafe config without exposing values', () => {
   for (const patch of [
     { ADMIN_HOST: '0.0.0.0' },
-    { ADMIN_TOKEN: 'replace-me' },
+    { ADMIN_JWT_SECRET: 'replace-me' },
     { AUTOREPLY_ENABLED: 'yes' },
     { WORKER_CONCURRENCY: '999' },
     { DATABASE_URL: 'https://private-secret' },

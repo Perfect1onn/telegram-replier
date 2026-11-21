@@ -2,7 +2,8 @@ export interface Settings {
   autoreplyEnabled: boolean;
   adminHost: string;
   adminPort: number;
-  adminToken: string;
+  adminJwtSecret: string;
+  adminPublicKeyFile: string;
   telegramApiId: number;
   telegramApiHash: string;
   expectedAccountId: string;
@@ -94,10 +95,10 @@ export function loadSettings(
   )
     throw new Error('Admin API requires loopback binding');
 
-  const adminToken = required('ADMIN_TOKEN');
+  const adminJwtSecret = required('ADMIN_JWT_SECRET');
 
-  if (Buffer.byteLength(adminToken) < 32 || /replace|placeholder/i.test(adminToken))
-    throw new Error('Invalid configuration: ADMIN_TOKEN');
+  if (Buffer.byteLength(adminJwtSecret) < 32 || /replace|placeholder/i.test(adminJwtSecret))
+    throw new Error('Invalid configuration: ADMIN_JWT_SECRET');
 
   const expectedAccountId = required('TELEGRAM_EXPECTED_ACCOUNT_ID');
 
@@ -113,7 +114,8 @@ export function loadSettings(
     autoreplyEnabled: enabled === 'true',
     adminHost,
     adminPort: integer('ADMIN_PORT', 8787, 1, 65535),
-    adminToken,
+    adminJwtSecret,
+    adminPublicKeyFile: required('ADMIN_PUBLIC_KEY_FILE'),
     telegramApiId: integer('TELEGRAM_API_ID', 0, 1, 2147483647),
     telegramApiHash,
     expectedAccountId,

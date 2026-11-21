@@ -12,6 +12,8 @@ COPY prisma ./prisma
 RUN XDG_CACHE_HOME=/tmp/prisma-cache npm run db:generate
 
 COPY src ./src
+COPY admin-ui ./admin-ui
+RUN npm run ui:build
 COPY scripts ./scripts
 
 USER node

@@ -1,4 +1,5 @@
 import OpenAI from 'openai';
+import { readFile } from 'node:fs/promises';
 import { PrismaClient } from '@prisma/client';
 import pino from 'pino';
 import { loadSettings } from './config/env.ts';
@@ -129,8 +130,12 @@ async function main(): Promise<void> {
 
     queue = new BullmqRuntime(db, settings.redisUrl);
 
+    const adminPublicKeyPem = await readFile(settings.adminPublicKeyFile, 'utf8');
+
     admin = createAdminApi({
-      token: settings.adminToken,
+      jwtSecret: settings.adminJwtSecret,
+      publicKeyPem: adminPublicKeyPem,
+      autoreplyEnabled: settings.autoreplyEnabled,
       db,
       store,
       dispatcher,

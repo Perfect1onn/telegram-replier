@@ -16,6 +16,7 @@ export function ChatEditor({
   const [form, setForm] = useState(chat);
   const [busy, setBusy] = useState(false);
   const [backfill, setBackfill] = useState('');
+  const canBackfill = chat.enabled && chat.mode !== 'OFF';
 
   async function save(event: FormEvent) {
     event.preventDefault();
@@ -51,6 +52,7 @@ export function ChatEditor({
   }
 
   async function queueBackfill() {
+    if (!canBackfill) return;
     if (!confirm(`Загрузить историю чата ${chat.chatId}?`)) return;
     try {
       const result = await request<{ jobId: string }>(`/api/chats/${chat.chatId}/backfill`, {
@@ -179,11 +181,21 @@ export function ChatEditor({
             />
           </label>
           {backfill && <p className="small-muted">{backfill}</p>}
+          {!canBackfill && (
+            <p className="small-muted">
+              Для загрузки истории включите чат, выберите DRAFT или AUTO и сохраните настройки.
+            </p>
+          )}
           <div className="modal-actions">
             <button type="button" className="subtle-danger" onClick={() => void purge()}>
               Удалить данные
             </button>
-            <button type="button" className="secondary" onClick={() => void queueBackfill()}>
+            <button
+              type="button"
+              className="secondary"
+              disabled={!canBackfill || busy}
+              onClick={() => void queueBackfill()}
+            >
               Загрузить историю
             </button>
             <button className="primary" disabled={busy}>

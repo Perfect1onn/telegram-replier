@@ -9,6 +9,9 @@ import type { ITelegramGateway } from '../../src/ports/contracts.ts';
 
 test('browser-style P-256 login issues a JWT that gates API routes', async () => {
   const pair = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const gateway = {
+    listPrivateDialogs: async () => [{ chatId: '123456', title: 'Алиса' }],
+  } as ITelegramGateway;
   const app = createAdminApi({
     jwtSecret: 'j'.repeat(64),
     publicKeyPem: pair.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
@@ -19,12 +22,16 @@ test('browser-style P-256 login issues a JWT that gates API routes', async () =>
     } as unknown as PrismaClient,
     store: {} as PrismaWorkflowStore,
     dispatcher: {} as OutboundDispatcher,
-    gateway: {} as ITelegramGateway,
+    gateway,
     ready: async () => true,
   });
 
   try {
     assert.equal((await app.inject({ method: 'GET', url: '/api/status' })).statusCode, 401);
+    assert.equal(
+      (await app.inject({ method: 'GET', url: '/api/telegram/dialogs' })).statusCode,
+      401,
+    );
 
     const challenge = (await app.inject({ method: 'POST', url: '/auth/challenge' })).json();
     const browserKey = await webcrypto.subtle.importKey(
@@ -68,6 +75,15 @@ test('browser-style P-256 login issues a JWT that gates API routes', async () =>
       ).statusCode,
       200,
     );
+
+    const dialogs = await app.inject({
+      method: 'GET',
+      url: '/api/telegram/dialogs',
+      headers: { authorization: `Bearer ${login.json().token}` },
+    });
+
+    assert.equal(dialogs.statusCode, 200);
+    assert.deepEqual(dialogs.json(), { items: [{ chatId: '123456', title: 'Алиса' }] });
     assert.equal(
       (
         await app.inject({

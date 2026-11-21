@@ -314,6 +314,50 @@ textarea:focus-visible {
   color: #8c9fb7;
   font-size: 0.78rem;
 }
+.dialog-panel {
+  display: block;
+  margin-bottom: 16px;
+}
+.dialog-panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.dialog-panel-heading h2 {
+  font-size: 1rem;
+  margin: 0 0 7px;
+}
+.dialog-panel > input {
+  width: 100%;
+  margin-bottom: 12px;
+}
+.dialog-list {
+  max-height: 350px;
+  overflow: auto;
+  display: grid;
+  gap: 1px;
+}
+.dialog-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 11px 4px;
+  border-top: 1px solid #2c3a4e;
+}
+.dialog-row strong,
+.dialog-row small {
+  display: block;
+}
+.dialog-row strong {
+  overflow-wrap: anywhere;
+}
+.dialog-row small {
+  color: #8c9fb7;
+  margin-top: 3px;
+}
 .item-list {
   display: grid;
   gap: 12px;

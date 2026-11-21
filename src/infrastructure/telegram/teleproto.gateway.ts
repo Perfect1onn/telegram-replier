@@ -111,6 +111,18 @@ export class TeleprotoGateway implements ITelegramGateway {
     return this.client;
   }
 
+  async listPrivateDialogs(): Promise<Array<{ chatId: string; title: string }>> {
+    const dialogs = await this.connected().getDialogs({ limit: 200 });
+
+    return dialogs.flatMap((dialog) => {
+      const user = dialog.entity;
+
+      if (!(user instanceof Api.User) || user.bot || user.self || user.deleted) return [];
+
+      return [{ chatId: user.id.toString(), title: dialog.title?.trim() || user.id.toString() }];
+    });
+  }
+
   async subscribeMessages(
     handler: (message: ChatMessage) => Promise<void>,
   ): Promise<() => Promise<void>> {

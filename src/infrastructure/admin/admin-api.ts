@@ -182,6 +182,10 @@ export function createAdminApi(options: AdminOptions): FastifyInstance {
     },
   );
 
+  app.get('/api/telegram/dialogs', async () => ({
+    items: await options.gateway.listPrivateDialogs(),
+  }));
+
   app.post<{ Body: { chatId?: string } }>('/api/chats', async (request, reply) => {
     const body = request.body;
 

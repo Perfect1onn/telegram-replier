@@ -3,12 +3,17 @@ import type { ILLMProvider, IRagService, ITelegramGateway } from '../../ports/co
 
 export class FakeGateway implements ITelegramGateway {
   sent: { chatId: string; text: string; dedupeKey: string }[] = [];
+  privateDialogs: Array<{ chatId: string; title: string }> = [];
   fail = false;
   history: ChatMessage[] = [];
 
   async connect(): Promise<void> {}
 
   async disconnect(): Promise<void> {}
+
+  async listPrivateDialogs(): Promise<Array<{ chatId: string; title: string }>> {
+    return this.privateDialogs;
+  }
 
   async subscribeMessages(
     _handler: (message: ChatMessage) => Promise<void>,

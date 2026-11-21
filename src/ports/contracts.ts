@@ -64,6 +64,7 @@ export interface IWorkflowStore extends IChatAdminService, IMessageRepository {
 export interface ITelegramGateway {
   connect(): Promise<void>;
   disconnect(): Promise<void>;
+  listPrivateDialogs(): Promise<Array<{ chatId: string; title: string }>>;
   subscribeMessages(handler: (message: ChatMessage) => Promise<void>): Promise<() => Promise<void>>;
   getHistory(
     chatId: string,

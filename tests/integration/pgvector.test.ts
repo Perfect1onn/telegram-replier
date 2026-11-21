@@ -55,7 +55,7 @@ test('pgvector upsert is idempotent and search spans chats', async () => {
   const chunkA = {
     id: randomUUID(),
     chatId: a,
-    content: 'Мою маму зовут Светлана',
+    content: 'Это тестовый проект по векторному поиску',
     messageIds: ['1'],
     tokenCount: 5,
   };
@@ -68,7 +68,7 @@ test('pgvector upsert is idempotent and search spans chats', async () => {
   assert.equal(await db.conversationChunk.count({ where: { chatId: a } }), 1);
   assert.deepEqual(
     (await vectors.search(first, 1)).map((row) => row.content),
-    ['Мою маму зовут Светлана'],
+    ['Это тестовый проект по векторному поиску'],
   );
   assert.deepEqual(
     (await vectors.search(second, 1)).map((row) => row.content),
@@ -85,7 +85,7 @@ test('pgvector upsert is idempotent and search spans chats', async () => {
     [a],
   );
   assert.deepEqual(
-    (await vectors.searchLexical('как зовут маму', 2)).map((row) => row.chatId),
+    (await vectors.searchLexical('расскажи о проекте', 2)).map((row) => row.chatId),
     [a],
   );
   await assert.rejects(vectors.search([1], 5));

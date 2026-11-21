@@ -35,6 +35,14 @@ export function ChatEditor({
     void loadProgress();
   }, [chat.chatId]);
 
+  useEffect(() => {
+    if (progress?.history.state !== 'PENDING') return;
+
+    const timer = setInterval(() => void loadProgress(), 10000);
+
+    return () => clearInterval(timer);
+  }, [chat.chatId, progress?.history.state]);
+
   async function save(event: FormEvent) {
     event.preventDefault();
     if (
@@ -169,6 +177,12 @@ export function ChatEditor({
           ) : (
             <p className="small-muted">
               {loadingProgress ? 'Загружаю состояние…' : 'Нет данных о состоянии.'}
+            </p>
+          )}
+          {progress?.history.state === 'PENDING' && (
+            <p className="small-muted">
+              Telegram может временно ограничивать запросы. Загрузка продолжится автоматически;
+              повторно нажимать кнопку не нужно.
             </p>
           )}
         </section>

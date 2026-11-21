@@ -1,5 +1,7 @@
 import { Api, TelegramClient } from 'teleproto';
+import { setTimeout as wait } from 'node:timers/promises';
 import { EditedMessage, NewMessage, type NewMessageEvent } from 'teleproto/events';
+import { FloodWaitError } from 'teleproto/errors';
 import { StringSession } from 'teleproto/sessions';
 import { Logger } from 'teleproto/extensions';
 import type { ChatMessage } from '../../domain/types.ts';
@@ -44,9 +46,31 @@ export function normalizeMessage(message: Api.Message, chatId: string): ChatMess
   };
 }
 
+export async function retryFloodWait<T>(
+  operation: () => Promise<T>,
+  pause: (ms: number) => Promise<void>,
+): Promise<T> {
+  for (;;) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (
+        !(error instanceof FloodWaitError) ||
+        !Number.isFinite(error.seconds) ||
+        error.seconds < 0 ||
+        error.seconds > 86400
+      )
+        throw error;
+
+      await pause((Math.ceil(error.seconds) + 1) * 1000);
+    }
+  }
+}
+
 export class TeleprotoGateway implements ITelegramGateway {
   private settings: TelegramSettings;
   private client: TelegramClient | null = null;
+  private historyAbort = new AbortController();
   private policy: IPolicyEngine;
   private onError: () => void;
 
@@ -57,6 +81,8 @@ export class TeleprotoGateway implements ITelegramGateway {
   }
 
   async connect(): Promise<void> {
+    this.historyAbort = new AbortController();
+
     const session = await readSessionFile(this.settings.sessionFile);
     const logger = new Logger();
 
@@ -99,6 +125,8 @@ export class TeleprotoGateway implements ITelegramGateway {
   }
 
   async disconnect(): Promise<void> {
+    this.historyAbort.abort();
+
     const client = this.client;
 
     this.client = null;
@@ -169,15 +197,24 @@ export class TeleprotoGateway implements ITelegramGateway {
       throw new Error('Invalid history limit');
 
     const client = this.connected();
-    const entity = await client.getEntity(chatId);
+    const page = await retryFloodWait(
+      async () => {
+        const entity = await client.getEntity(chatId);
 
-    if (!(entity instanceof Api.User) || entity.bot || entity.self)
-      throw new Error('Unsupported peer');
+        if (!(entity instanceof Api.User) || entity.bot || entity.self)
+          throw new Error('Unsupported peer');
 
-    const page = await client.getMessages(entity, {
-      limit,
-      ...(cursor ? { offsetId: messageNumber(cursor) } : {}),
-    });
+        return client.getMessages(entity, {
+          limit,
+          ...(cursor ? { offsetId: messageNumber(cursor) } : {}),
+        });
+      },
+      async (ms) => {
+        await wait(ms, undefined, {
+          signal: this.historyAbort.signal,
+        });
+      },
+    );
     const items = [];
 
     for (const message of page) {

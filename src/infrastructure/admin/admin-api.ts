@@ -1,0 +1,410 @@
+import { createHash, timingSafeEqual } from 'node:crypto';
+import Fastify, { type FastifyInstance } from 'fastify';
+import type { PrismaClient } from '@prisma/client';
+import { AccessDeniedError, ConflictError } from '../../domain/types.ts';
+import type { ChatPatch } from '../../application/chat-config.ts';
+import { PrismaWorkflowStore } from '../persistence/prisma-workflow.store.ts';
+import { mapChat } from '../persistence/message.mapper.ts';
+import type { OutboundDispatcher } from '../../application/outbound-dispatcher.ts';
+import type { ITelegramGateway } from '../../ports/contracts.ts';
+
+interface AdminOptions {
+  token: string;
+  db: PrismaClient;
+  store: PrismaWorkflowStore;
+  dispatcher: OutboundDispatcher;
+  gateway: ITelegramGateway;
+  ready: () => Promise<boolean>;
+}
+
+function validChatId(value: string): boolean {
+  return /^[1-9]\d*$/.test(value) && value.length <= 20;
+}
+
+function validUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+export function createAdminApi(options: AdminOptions): FastifyInstance {
+  if (Buffer.byteLength(options.token) < 32) throw new Error('Invalid admin token');
+
+  const expected = createHash('sha256').update(options.token).digest();
+  const requests = new Map<string, { start: number; count: number }>();
+  const app = Fastify({ logger: false, bodyLimit: 16384, requestTimeout: 10000 });
+
+  app.addHook('onRequest', async (request, reply) => {
+    if (request.url === '/health/live' || request.url === '/health/ready') return;
+
+    const supplied = request.headers.authorization;
+    const hash = createHash('sha256')
+      .update(supplied?.startsWith('Bearer ') ? supplied.slice(7) : '')
+      .digest();
+
+    if (!timingSafeEqual(expected, hash)) {
+      await reply.code(401).send({ error: 'Unauthorized' });
+
+      return;
+    }
+
+    const now = Date.now();
+    const current = requests.get(request.ip);
+    const next =
+      current && now - current.start < 60000
+        ? { start: current.start, count: current.count + 1 }
+        : { start: now, count: 1 };
+
+    if (requests.size > 1024) requests.clear();
+
+    requests.set(request.ip, next);
+
+    if (next.count > 120) await reply.code(429).send({ error: 'Rate limit exceeded' });
+  });
+
+  app.setErrorHandler((error, _request, reply) => {
+    const code =
+      error && typeof error === 'object' && 'statusCode' in error ? error.statusCode : undefined;
+    const status =
+      error instanceof ConflictError
+        ? 409
+        : error instanceof AccessDeniedError
+          ? 404
+          : typeof code === 'number' && code >= 400 && code < 500
+            ? code
+            : 500;
+
+    reply.code(status).send({
+      error: status === 500 ? 'Internal error' : status === 409 ? 'Conflict' : 'Invalid request',
+    });
+  });
+
+  app.get('/health/live', async () => ({ live: true }));
+
+  app.get('/health/ready', async (_request, reply) => {
+    try {
+      if (await options.ready()) return { ready: true };
+    } catch {
+      return reply.code(503).send({ ready: false });
+    }
+
+    return reply.code(503).send({ ready: false });
+  });
+
+  app.get<{ Querystring: { limit?: string; cursor?: string } }>(
+    '/api/chats',
+    async (request, reply) => {
+      const limit = request.query.limit === undefined ? 20 : Number(request.query.limit);
+      const cursor = request.query.cursor;
+
+      if (
+        !Number.isInteger(limit) ||
+        limit < 1 ||
+        limit > 100 ||
+        (cursor !== undefined && !validChatId(cursor)) ||
+        Object.keys(request.query).some((key) => !['limit', 'cursor'].includes(key))
+      )
+        return reply.code(400).send({ error: 'Invalid request' });
+
+      const rows = await options.db.allowedChat.findMany({
+        orderBy: { chatId: 'asc' },
+        take: limit + 1,
+        ...(cursor ? { cursor: { chatId: cursor }, skip: 1 } : {}),
+      });
+
+      return {
+        items: rows.slice(0, limit).map(mapChat),
+        nextCursor: rows.length > limit ? rows[limit - 1]?.chatId : null,
+      };
+    },
+  );
+
+  app.post<{ Body: { chatId?: string } }>('/api/chats', async (request, reply) => {
+    const body = request.body;
+
+    if (
+      !body ||
+      typeof body.chatId !== 'string' ||
+      !validChatId(body.chatId) ||
+      Object.keys(body).length !== 1
+    )
+      return reply.code(400).send({ error: 'Invalid request' });
+
+    const chat = await options.store.updateChat(body.chatId, {}, 0);
+
+    return reply.code(201).send(chat);
+  });
+
+  app.get<{ Params: { chatId: string } }>('/api/chats/:chatId', async (request, reply) => {
+    const { chatId } = request.params;
+
+    if (!validChatId(chatId)) return reply.code(400).send({ error: 'Invalid request' });
+
+    const chat = await options.store.getChat(chatId);
+
+    if (!chat) return reply.code(404).send({ error: 'Not found' });
+
+    return chat;
+  });
+
+  app.post<{ Params: { chatId: string } }>(
+    '/api/chats/:chatId/backfill',
+    async (request, reply) => {
+      const { chatId } = request.params;
+
+      if (!validChatId(chatId)) return reply.code(400).send({ error: 'Invalid request' });
+
+      const id = await options.store.enqueueBackfill(chatId);
+
+      return reply.code(202).send({ jobId: id });
+    },
+  );
+
+  app.get<{ Params: { chatId: string } }>('/api/chats/:chatId/backfill', async (request, reply) => {
+    const { chatId } = request.params;
+
+    if (!validChatId(chatId)) return reply.code(400).send({ error: 'Invalid request' });
+
+    if (!(await options.store.getChat(chatId))) return reply.code(404).send({ error: 'Not found' });
+
+    return options.store.checkpoint(chatId);
+  });
+
+  app.put<{ Params: { chatId: string }; Body: { expectedVersion?: number; patch?: ChatPatch } }>(
+    '/api/chats/:chatId',
+    async (request, reply) => {
+      const { chatId } = request.params;
+      const body = request.body;
+
+      if (
+        !validChatId(chatId) ||
+        !body ||
+        !Number.isSafeInteger(body.expectedVersion) ||
+        typeof body.patch !== 'object' ||
+        body.patch === null ||
+        Array.isArray(body.patch) ||
+        Object.keys(body).some((key) => !['expectedVersion', 'patch'].includes(key))
+      )
+        return reply.code(400).send({ error: 'Invalid request' });
+
+      try {
+        return await options.store.updateChat(chatId, body.patch, body.expectedVersion ?? -1);
+      } catch (error) {
+        if (error instanceof ConflictError) throw error;
+
+        return reply.code(400).send({ error: 'Invalid request' });
+      }
+    },
+  );
+
+  app.post('/api/system/pause', async () => {
+    await options.store.setPaused(true);
+
+    return { paused: true };
+  });
+
+  app.post('/api/system/resume', async () => {
+    await options.store.setPaused(false);
+
+    return { paused: false };
+  });
+
+  app.get('/api/status', async () => {
+    const [system, pendingOutbox, unknownSends] = await Promise.all([
+      options.db.systemState.findUnique({ where: { id: 1 }, select: { paused: true } }),
+      options.db.jobOutbox.count({ where: { publishedAt: null } }),
+      options.db.replyOperation.count({ where: { status: 'UNKNOWN' } }),
+    ]);
+
+    return { paused: system?.paused ?? true, pendingOutbox, unknownSends };
+  });
+
+  app.get<{ Querystring: { limit?: string } }>('/api/sends/unknown', async (request, reply) => {
+    const limit = request.query.limit === undefined ? 20 : Number(request.query.limit);
+
+    if (
+      !Number.isInteger(limit) ||
+      limit < 1 ||
+      limit > 100 ||
+      Object.keys(request.query).some((key) => key !== 'limit')
+    )
+      return reply.code(400).send({ error: 'Invalid request' });
+
+    const operations = await options.db.replyOperation.findMany({
+      where: { status: 'UNKNOWN' },
+      orderBy: [{ updatedAt: 'asc' }, { id: 'asc' }],
+      take: limit,
+      select: {
+        id: true,
+        chatId: true,
+        triggerMessageId: true,
+        generatedText: true,
+        updatedAt: true,
+      },
+    });
+
+    return { items: operations };
+  });
+
+  app.post<{
+    Params: { id: string };
+    Body: {
+      outcome?: 'SENT' | 'NOT_SENT';
+      telegramMessageId?: string;
+      confirm?: string;
+    };
+  }>('/api/sends/:id/reconcile', async (request, reply) => {
+    const { id } = request.params;
+    const body = request.body;
+
+    if (
+      !validUuid(id) ||
+      !body ||
+      body.confirm !== `RECONCILE ${id}` ||
+      (body.outcome !== 'SENT' && body.outcome !== 'NOT_SENT') ||
+      Object.keys(body).some((key) => !['outcome', 'telegramMessageId', 'confirm'].includes(key))
+    )
+      return reply.code(400).send({ error: 'Invalid request' });
+
+    const operation = await options.db.replyOperation.findUnique({ where: { id } });
+
+    if (!operation || operation.status !== 'UNKNOWN')
+      return reply.code(404).send({ error: 'Not found' });
+
+    if (body.outcome === 'SENT') {
+      const messageId = body.telegramMessageId;
+
+      if (!messageId || !/^\d+$/.test(messageId))
+        return reply.code(400).send({ error: 'Invalid request' });
+
+      const history = await options.gateway.getHistory(operation.chatId, undefined, 100);
+      const match = history.items.find(
+        (message) =>
+          message.messageId === messageId &&
+          message.direction === 'OUTGOING' &&
+          message.text === operation.generatedText &&
+          message.replyToMessageId === operation.triggerMessageId,
+      );
+
+      if (!match) return reply.code(409).send({ error: 'Conflict' });
+    } else if (body.telegramMessageId !== undefined) {
+      return reply.code(400).send({ error: 'Invalid request' });
+    }
+
+    if (!(await options.store.reconcileSend(id, body.outcome, body.telegramMessageId)))
+      return reply.code(409).send({ error: 'Conflict' });
+
+    return { status: body.outcome === 'SENT' ? 'SENT' : 'CANCELLED' };
+  });
+
+  app.get<{ Querystring: { limit?: string; cursor?: string } }>(
+    '/api/drafts',
+    async (request, reply) => {
+      const limit = request.query.limit === undefined ? 20 : Number(request.query.limit);
+      const cursor = request.query.cursor;
+
+      if (
+        !Number.isInteger(limit) ||
+        limit < 1 ||
+        limit > 100 ||
+        (cursor !== undefined && !validUuid(cursor)) ||
+        Object.keys(request.query).some((key) => !['limit', 'cursor'].includes(key))
+      )
+        return reply.code(400).send({ error: 'Invalid request' });
+
+      const rows = await options.db.draft.findMany({
+        where: { status: 'PENDING' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: limit + 1,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      });
+
+      return {
+        items: rows.slice(0, limit).map((row) => ({
+          id: row.id,
+          chatId: row.chatId,
+          text: row.text,
+          triggerMessageId: row.triggerMessageId,
+          createdAt: row.createdAt,
+        })),
+        nextCursor: rows.length > limit ? rows[limit - 1]?.id : null,
+      };
+    },
+  );
+
+  app.post<{ Params: { id: string } }>('/api/drafts/:id/approve', async (request, reply) => {
+    if (!validUuid(request.params.id)) return reply.code(400).send({ error: 'Invalid request' });
+
+    const draft = await options.db.draft.findUnique({ where: { id: request.params.id } });
+
+    if (!draft || draft.status !== 'PENDING') return reply.code(404).send({ error: 'Not found' });
+
+    const generation = Number(draft.generation);
+
+    if (!Number.isSafeInteger(generation)) return reply.code(409).send({ error: 'Conflict' });
+
+    await options.dispatcher.dispatch(
+      {
+        chatId: draft.chatId,
+        triggerMessageId: draft.triggerMessageId,
+        generation,
+        configVersion: draft.configVersion,
+      },
+      {
+        text: draft.text,
+        model: 'approved-draft',
+        usage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 },
+      },
+      true,
+    );
+
+    const updated = await options.db.draft.findUnique({ where: { id: draft.id } });
+
+    if (updated?.status !== 'APPROVED') return reply.code(409).send({ error: 'Conflict' });
+
+    return { status: 'APPROVED' };
+  });
+
+  app.post<{ Params: { id: string } }>('/api/drafts/:id/reject', async (request, reply) => {
+    if (!validUuid(request.params.id)) return reply.code(400).send({ error: 'Invalid request' });
+
+    if (!(await options.store.rejectDraft(request.params.id)))
+      return reply.code(404).send({ error: 'Not found' });
+
+    return { status: 'REJECTED' };
+  });
+
+  app.get('/api/usage', async () => {
+    const usage = await options.db.llmUsage.aggregate({
+      _count: { requestId: true },
+      _sum: { inputTokens: true, outputTokens: true, estimatedCostUsd: true },
+    });
+
+    return {
+      requests: usage._count.requestId,
+      inputTokens: usage._sum.inputTokens ?? 0,
+      outputTokens: usage._sum.outputTokens ?? 0,
+      estimatedCostUsd: usage._sum.estimatedCostUsd?.toString() ?? null,
+    };
+  });
+
+  app.delete<{ Params: { chatId: string }; Body: { confirm?: string } }>(
+    '/api/chats/:chatId/data',
+    async (request, reply) => {
+      const chatId = request.params.chatId;
+
+      if (
+        !validChatId(chatId) ||
+        !request.body ||
+        request.body.confirm !== `PURGE ${chatId}` ||
+        Object.keys(request.body).length !== 1
+      )
+        return reply.code(400).send({ error: 'Invalid request' });
+
+      if (!(await options.store.purgeChat(chatId)))
+        return reply.code(404).send({ error: 'Not found' });
+
+      return { purged: true };
+    },
+  );
+
+  return app;
+}

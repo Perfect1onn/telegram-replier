@@ -1,0 +1,61 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: replier
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: telegram_replier
+    volumes:
+      - replier_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U replier -d telegram_replier"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - replier_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    profiles: ["app"]
+    build: .
+    command: ["npm", "run", "db:migrate"]
+    environment:
+      DATABASE_URL: postgresql://replier:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/telegram_replier
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  app:
+    profiles: ["app"]
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://replier:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/telegram_replier
+      REDIS_URL: redis://redis:6379
+      TELEGRAM_SESSION_FILE: /run/telegram/session
+      ADMIN_HOST: 0.0.0.0
+      ADMIN_ALLOW_CONTAINER_BIND: "true"
+      ADMIN_PORT: "8787"
+      AUTOREPLY_ENABLED: "false"
+    volumes:
+      - ./.telegram-session:/run/telegram/session:ro
+    ports:
+      - "127.0.0.1:8787:8787"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+volumes:
+  replier_postgres:
+  replier_redis:

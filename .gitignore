@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+.telegram-session
+*.session
+*.key
+*.pem
+*.dump
+*.trbk
+*.sql.gz
+*.log
+data/
+coverage/
+*.[mM][dD]
+!/README.[mM][dD]

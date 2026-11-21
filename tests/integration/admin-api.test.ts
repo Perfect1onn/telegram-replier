@@ -1,0 +1,269 @@
+import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
+import { after, test } from 'node:test';
+import { PrismaClient } from '@prisma/client';
+import { createAdminApi } from '../../src/infrastructure/admin/admin-api.ts';
+import { PrismaWorkflowStore } from '../../src/infrastructure/persistence/prisma-workflow.store.ts';
+import { PolicyEngine } from '../../src/application/policy-engine.ts';
+import { OutboundDispatcher } from '../../src/application/outbound-dispatcher.ts';
+import { FakeGateway } from '../../src/infrastructure/testing/fakes.ts';
+
+const databaseUrl = process.env.TEST_DATABASE_URL;
+
+if (!databaseUrl) throw new Error('TEST_DATABASE_URL is required');
+
+const db = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
+const token = randomBytes(32).toString('hex');
+const store = new PrismaWorkflowStore(db);
+const adminGateway = new FakeGateway();
+const dispatcher = new OutboundDispatcher(
+  store,
+  new PolicyEngine(store, () => false),
+  adminGateway,
+);
+const app = createAdminApi({
+  db,
+  store,
+  dispatcher,
+  gateway: adminGateway,
+  token,
+  ready: async () => true,
+});
+
+after(async () => {
+  await app.close();
+  await db.$disconnect();
+});
+
+test('admin API requires bearer auth and versioned chat updates', async () => {
+  const chatId = String(BigInt(`4${Date.now()}`));
+  const url = `/api/chats/${chatId}`;
+
+  assert.equal((await app.inject({ method: 'GET', url: '/health/live' })).statusCode, 200);
+  assert.equal((await app.inject({ method: 'GET', url: '/health/ready' })).statusCode, 200);
+  assert.equal((await app.inject({ method: 'GET', url })).statusCode, 401);
+  assert.equal(
+    (await app.inject({ method: 'GET', url, headers: { authorization: 'Bearer wrong' } }))
+      .statusCode,
+    401,
+  );
+
+  const headers = { authorization: `Bearer ${token}` };
+
+  assert.equal(
+    (await app.inject({ method: 'GET', url: '/api/chats?limit=5', headers })).statusCode,
+    200,
+  );
+
+  const created = await app.inject({
+    method: 'PUT',
+    url,
+    headers,
+    payload: { expectedVersion: 0, patch: { enabled: true, mode: 'DRAFT' } },
+  });
+
+  assert.equal(created.statusCode, 200);
+  assert.equal(created.json().version, 1);
+  assert.equal(
+    (
+      await app.inject({
+        method: 'PUT',
+        url,
+        headers,
+        payload: { expectedVersion: 0, patch: { mode: 'AUTO' } },
+      })
+    ).statusCode,
+    409,
+  );
+  assert.equal(
+    (
+      await app.inject({
+        method: 'PUT',
+        url,
+        headers,
+        payload: { expectedVersion: 1, patch: { maxRepliesPerHour: 1000 } },
+      })
+    ).statusCode,
+    400,
+  );
+  assert.equal(
+    (await app.inject({ method: 'POST', url: '/api/system/pause', headers })).statusCode,
+    200,
+  );
+  assert.equal(
+    (await app.inject({ method: 'GET', url: '/api/status', headers })).json().paused,
+    true,
+  );
+  assert.equal((await app.inject({ method: 'GET', url: '/api/usage', headers })).statusCode, 200);
+  assert.equal(
+    (await app.inject({ method: 'POST', url: `${url}/backfill`, headers })).statusCode,
+    202,
+  );
+  assert.equal(
+    (await app.inject({ method: 'GET', url: `${url}/backfill`, headers })).statusCode,
+    200,
+  );
+  assert.equal(
+    (await app.inject({ method: 'GET', url: '/api/drafts?limit=10', headers })).statusCode,
+    200,
+  );
+  assert.equal(
+    (
+      await app.inject({
+        method: 'DELETE',
+        url: `${url}/data`,
+        headers,
+        payload: { confirm: 'wrong' },
+      })
+    ).statusCode,
+    400,
+  );
+  assert.equal(
+    (
+      await app.inject({
+        method: 'DELETE',
+        url: `${url}/data`,
+        headers,
+        payload: { confirm: `PURGE ${chatId}` },
+      })
+    ).statusCode,
+    200,
+  );
+  assert.equal((await app.inject({ method: 'GET', url, headers })).statusCode, 404);
+});
+
+test('explicit draft approval sends only through the dispatcher', async () => {
+  const chatId = String(BigInt(`7${Date.now()}`));
+  const chat = await store.updateChat(chatId, { enabled: true, mode: 'DRAFT' }, 0);
+  const now = Date.now();
+
+  await store.ingest(
+    {
+      chatId,
+      messageId: '700',
+      senderId: chatId,
+      direction: 'INCOMING',
+      source: 'TELEGRAM',
+      text: 'hello',
+      occurredAt: new Date(now),
+    },
+    now,
+  );
+
+  const operation = await db.replyOperation.findFirstOrThrow({ where: { chatId } });
+  const input = {
+    chatId,
+    triggerMessageId: '700',
+    generation: Number(operation.generation),
+    configVersion: chat.version,
+  };
+
+  await store.saveDraft(input, {
+    text: 'hello',
+    model: 'fake',
+    usage: { inputTokens: 1, outputTokens: 1, cachedInputTokens: 0 },
+  });
+  await store.setPaused(false);
+
+  const gateway = new FakeGateway();
+  const approvalApi = createAdminApi({
+    db,
+    store,
+    token,
+    gateway,
+    ready: async () => true,
+    dispatcher: new OutboundDispatcher(store, new PolicyEngine(store, () => true), gateway),
+  });
+
+  try {
+    const response = await approvalApi.inject({
+      method: 'POST',
+      url: `/api/drafts/${operation.id}/approve`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(gateway.sent.length, 1);
+    assert.equal(
+      (await db.replyOperation.findUniqueOrThrow({ where: { id: operation.id } })).status,
+      'SENT',
+    );
+    assert.equal(
+      (
+        await approvalApi.inject({
+          method: 'POST',
+          url: `/api/drafts/${operation.id}/approve`,
+          headers: { authorization: `Bearer ${token}` },
+        })
+      ).statusCode,
+      404,
+    );
+  } finally {
+    await approvalApi.close();
+  }
+});
+
+test('UNKNOWN send requires explicit history-backed reconciliation', async () => {
+  const chatId = String(BigInt(`3${Date.now()}3`));
+  const chat = await store.updateChat(chatId, { enabled: true, mode: 'AUTO' }, 0);
+  const now = Date.now();
+
+  await store.ingest(
+    {
+      chatId,
+      messageId: '900',
+      senderId: chatId,
+      direction: 'INCOMING',
+      source: 'TELEGRAM',
+      text: 'hello',
+      occurredAt: new Date(now),
+    },
+    now,
+  );
+
+  const operation = await db.replyOperation.findFirstOrThrow({ where: { chatId } });
+  const claim = await store.claimSend(
+    {
+      chatId,
+      triggerMessageId: '900',
+      generation: Number(operation.generation),
+      configVersion: chat.version,
+    },
+    {
+      text: 'reply',
+      model: 'fake',
+      usage: { inputTokens: 1, outputTokens: 1, cachedInputTokens: 0 },
+    },
+    false,
+    now,
+  );
+
+  if (!claim) throw new Error('Send was not claimed');
+
+  await store.finishSend(claim.id, null);
+
+  const headers = { authorization: `Bearer ${token}` };
+  const url = `/api/sends/${claim.id}/reconcile`;
+  const body = { outcome: 'SENT', telegramMessageId: '901', confirm: `RECONCILE ${claim.id}` };
+
+  assert.equal((await app.inject({ method: 'POST', url, headers, payload: body })).statusCode, 409);
+
+  adminGateway.history = [
+    {
+      chatId,
+      messageId: '901',
+      senderId: 'self',
+      direction: 'OUTGOING',
+      source: 'TELEGRAM',
+      text: 'reply',
+      replyToMessageId: '900',
+      occurredAt: new Date(now + 1),
+    },
+  ];
+
+  assert.equal((await app.inject({ method: 'POST', url, headers, payload: body })).statusCode, 200);
+  assert.equal(
+    (await db.replyOperation.findUniqueOrThrow({ where: { id: claim.id } })).status,
+    'SENT',
+  );
+});

@@ -1,0 +1,36 @@
+# Telegram AI Replier
+
+**Status: incomplete. Do not deploy or enable AUTO.** Read [IMPLEMENTATION_REPORT.md](IMPLEMENTATION_REPORT.md) for verified behavior and remaining gaps. No live Telegram message or paid OpenAI request was made during development.
+
+## Safe local checks
+
+Use Node.js 24. Copy `.env.example` to `.env` only when preparing local services; keep `.env` private. The default `AUTOREPLY_ENABLED=false` and new chats default to OFF. The database `system_state` also starts paused.
+
+```sh
+npm ci --ignore-scripts
+npm run db:generate
+npm run check
+```
+
+`npm run check` runs formatting, ESLint, strict TypeScript and unit/fake tests. It does not contact Telegram or OpenAI. `npm run smoke` is an in-process fake pipeline check.
+
+## Isolated integration tests
+
+Use a dedicated PostgreSQL 16 database with pgvector and a dedicated Redis instance. Set `DATABASE_URL` for migrations, and `TEST_DATABASE_URL`/`TEST_REDIS_URL` for tests. Never point these at personal or production data.
+
+```sh
+npm run db:migrate
+npm run test:integration
+```
+
+The integration suite performs real Prisma transactions, BullMQ publication, pgvector search, and admin route checks. Its model calls use fake embeddings and its send check uses a fake Telegram gateway.
+
+## Docker Compose
+
+Set a fresh `POSTGRES_PASSWORD` in `.env`. `docker compose up -d postgres redis` starts only project database and queue services. `docker compose --profile app up --build` additionally runs migrations and starts the backend; this requires an existing 0600 `.telegram-session` file and valid Telegram/OpenAI API configuration. The Compose app profile **forces `AUTOREPLY_ENABLED=false`** and exposes admin only on host loopback port 8787. The app's container bind to `0.0.0.0` is allowed only by the explicit `ADMIN_ALLOW_CONTAINER_BIND=true` override in Compose; the admin API still requires a strong bearer token.
+
+For local process startup after preparing services and a session, use `node --env-file=.env src/main.ts`. Do not run this against a personal Telegram session as a smoke test. The runtime has not passed a live session/identity/reconnect check.
+
+## Operations
+
+Admin endpoints include chat config, pause, drafts, status, usage, durable backfill, explicit UNKNOWN send reconciliation and chat purge. Purge requires `{ "confirm": "PURGE <chatId>" }`. Backfill uses `POST /api/chats/:chatId/backfill` and `GET /api/chats/:chatId/backfill`. Inspect UNKNOWN sends with `GET /api/sends/unknown`; verify Telegram history before calling `POST /api/sends/:id/reconcile`. A `NOT_SENT` conclusion requires independent human verification because a missing item in a limited history page is not proof of non-delivery. UNKNOWN sends are never retried automatically. See [docs/BACKUP_RESTORE.md](docs/BACKUP_RESTORE.md) for the tested database backup format and restore limits. Before operational use, finish the remaining items in `IMPLEMENTATION_REPORT.md`, especially live session/reconnect validation and recovery procedures.

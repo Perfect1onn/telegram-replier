@@ -1,0 +1,10 @@
+.env
+.env.*
+*.session
+.telegram-session
+*.key
+*.pem
+*.trbk
+node_modules
+.git
+data

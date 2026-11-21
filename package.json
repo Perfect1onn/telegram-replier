@@ -1,0 +1,50 @@
+{
+  "name": "telegram-replier",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0 <25"
+  },
+  "scripts": {
+    "test": "node --test tests/unit/*.test.ts tests/e2e/*.test.ts",
+    "smoke": "node --test tests/e2e/*.test.ts",
+    "test:integration": "node --test --test-concurrency=1 tests/integration/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src tests scripts eslint.config.js",
+    "format": "prettier --write src tests scripts *.json *.md eslint.config.js",
+    "format:check": "prettier --check src tests scripts *.json *.md eslint.config.js",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm test",
+    "login": "node --env-file=.env scripts/login.ts",
+    "start": "node src/main.ts",
+    "db:generate": "prisma generate",
+    "db:validate": "prisma validate",
+    "db:migrate": "prisma migrate deploy",
+    "backup:encrypt": "node scripts/backup.ts",
+    "backup:decrypt": "node scripts/restore.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "6.19.3",
+    "bullmq": "6.7.8",
+    "fastify": "5.12.8",
+    "ioredis": "5.11.1",
+    "openai": "7.62.0",
+    "pino": "10.4.0",
+    "teleproto": "1.233.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.19.2",
+    "eslint": "10.15.0",
+    "prettier": "3.10.1",
+    "prisma": "6.19.3",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.73.0"
+  },
+  "overrides": {
+    "@prisma/config": {
+      "deepmerge-ts": "8.0.2",
+      "effect": "3.22.1"
+    }
+  }
+}

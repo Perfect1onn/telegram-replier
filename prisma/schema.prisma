@@ -1,0 +1,192 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model AllowedChat {
+  chatId              String   @id @map("chat_id")
+  enabled             Boolean  @default(false)
+  mode                String   @default("OFF")
+  systemPrompt        String?  @map("system_prompt")
+  replyDelayMs        Int      @default(12000) @map("reply_delay_ms")
+  recentMessageLimit  Int      @default(15) @map("recent_message_limit")
+  cancelOnManualReply Boolean  @default(true) @map("cancel_on_manual_reply")
+  maxRepliesPerHour   Int      @default(20) @map("max_replies_per_hour")
+  version             Int      @default(1)
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@map("allowed_chats")
+}
+
+model Message {
+  chatId           String    @map("chat_id")
+  messageId        String    @map("message_id")
+  senderId         String    @map("sender_id")
+  direction        String
+  source           String
+  text             String
+  occurredAt       DateTime  @map("occurred_at") @db.Timestamptz
+  replyToMessageId String?   @map("reply_to_message_id")
+  editedAt         DateTime? @map("edited_at") @db.Timestamptz
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  @@id([chatId, messageId])
+  @@index([chatId, occurredAt(sort: Desc), messageId(sort: Desc)], map: "messages_recent")
+  @@map("messages")
+}
+
+model DeferredOutgoing {
+  chatId     String   @map("chat_id")
+  messageId  String   @map("message_id")
+  occurredAt DateTime @map("occurred_at") @db.Timestamptz
+
+  @@id([chatId, messageId])
+  @@map("deferred_outgoing")
+}
+
+model ChatRuntimeState {
+  chatId                String    @id @map("chat_id")
+  generation            BigInt    @default(0)
+  lastManualOutgoingAt  DateTime? @map("last_manual_outgoing_at") @db.Timestamptz
+  lastTelegramMessageId String?   @map("last_telegram_message_id")
+  updatedAt             DateTime  @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@map("chat_runtime_state")
+}
+
+model ReplyOperation {
+  id                String   @id @db.Uuid
+  chatId            String   @map("chat_id")
+  generation        BigInt
+  configVersion     Int      @map("config_version")
+  triggerMessageId  String   @map("trigger_message_id")
+  status            String
+  dedupeKey         String   @unique @map("dedupe_key")
+  generatedText     String?  @map("generated_text")
+  telegramMessageId String?  @map("telegram_message_id")
+  attempts          Int      @default(0)
+  errorCategory     String?  @map("error_category")
+  dueAt             DateTime @map("due_at") @db.Timestamptz
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@unique([chatId, generation])
+  @@map("reply_operations")
+}
+
+model Draft {
+  id               String   @id @db.Uuid
+  chatId           String   @map("chat_id")
+  triggerMessageId String   @map("trigger_message_id")
+  text             String
+  status           String   @default("PENDING")
+  generation       BigInt
+  configVersion    Int      @map("config_version")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@map("drafts")
+}
+
+model SyncCheckpoint {
+  chatId        String    @map("chat_id")
+  kind          String
+  cursor        String?
+  state         String    @default("PENDING")
+  lastSuccessAt DateTime? @map("last_success_at") @db.Timestamptz
+  lastErrorCode String?   @map("last_error_code")
+  updatedAt     DateTime  @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@id([chatId, kind])
+  @@map("sync_checkpoints")
+}
+
+model JobOutbox {
+  id          String    @id @db.Uuid
+  chatId      String    @map("chat_id")
+  taskType    String    @map("task_type")
+  generation  BigInt
+  payload     Json
+  dueAt       DateTime  @map("due_at") @db.Timestamptz
+  publishedAt DateTime? @map("published_at") @db.Timestamptz
+  attempts    Int       @default(0)
+
+  @@unique([chatId, generation, taskType])
+  @@map("job_outbox")
+}
+
+model SystemState {
+  id        Int      @id
+  paused    Boolean  @default(true)
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@map("system_state")
+}
+
+model AuditEvent {
+  id            BigInt   @id @default(autoincrement())
+  actor         String
+  action        String
+  chatId        String?  @map("chat_id")
+  outcome       String
+  reason        String
+  correlationId String   @map("correlation_id") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("audit_events")
+}
+
+model LlmUsage {
+  requestId         String   @id @map("request_id") @db.Uuid
+  chatId            String   @map("chat_id")
+  model             String
+  inputTokens       Int      @map("input_tokens")
+  outputTokens      Int      @map("output_tokens")
+  cachedInputTokens Int      @map("cached_input_tokens")
+  estimatedCostUsd  Decimal? @map("estimated_cost_usd") @db.Decimal(20, 10)
+  priceVersion      String?  @map("price_version")
+  priceEffectiveAt  DateTime? @map("price_effective_at") @db.Date
+  status            String
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("llm_usage")
+}
+
+model ConversationChunk {
+  id             String                       @id @db.Uuid
+  chatId         String                       @map("chat_id")
+  content        String
+  firstMessageId String                       @map("first_message_id")
+  lastMessageId  String                       @map("last_message_id")
+  messageIds     String[]                     @map("message_ids")
+  status         String
+  tokenCount     Int                          @map("token_count")
+  embeddingModel String                       @map("embedding_model")
+  embedding      Unsupported("vector(1536)")?
+  contentHash    String                       @map("content_hash")
+  createdAt      DateTime                     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime                     @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@unique([chatId, contentHash, embeddingModel])
+  @@index([chatId], map: "chunks_chat")
+  @@map("conversation_chunks")
+}
+
+model IndexingState {
+  chatId         String    @id @map("chat_id")
+  version        Int       @default(0)
+  lastOccurredAt DateTime? @map("last_occurred_at") @db.Timestamptz
+  lastMessageId  String?   @map("last_message_id")
+  openParts      String[]  @default([]) @map("open_parts")
+  openIds        String[]  @default([]) @map("open_ids")
+  openLastAt     DateTime? @map("open_last_at") @db.Timestamptz
+  openLastId     String?   @map("open_last_id")
+  updatedAt      DateTime  @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@map("indexing_state")
+}

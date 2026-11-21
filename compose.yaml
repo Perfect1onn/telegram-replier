@@ -49,7 +49,7 @@ services:
       ADMIN_HOST: 0.0.0.0
       ADMIN_ALLOW_CONTAINER_BIND: "true"
       ADMIN_PORT: "8787"
-      AUTOREPLY_ENABLED: "false"
+      AUTOREPLY_ENABLED: ${AUTOREPLY_ENABLED:-false}
     volumes:
       - ./.telegram-session:/run/telegram/session:ro
       - ./.admin-public.pem:/run/admin/public.pem:ro

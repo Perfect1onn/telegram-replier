@@ -1,3 +1,4 @@
+import { randomBytes, randomUUID } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 
 export class RetentionService {
@@ -71,7 +72,26 @@ export class RetentionService {
           await tx.jobOutbox.deleteMany({
             where: { chatId, dueAt: { lt: cutoff }, publishedAt: { not: null } },
           });
-          await tx.message.deleteMany({ where: { chatId, occurredAt: { lt: cutoff } } });
+
+          const removed = await tx.message.deleteMany({
+            where: { chatId, occurredAt: { lt: cutoff } },
+          });
+
+          if (removed.count) {
+            const chat = await tx.allowedChat.findUnique({ where: { chatId } });
+
+            if (chat?.enabled && chat.mode !== 'OFF')
+              await tx.jobOutbox.create({
+                data: {
+                  id: randomUUID(),
+                  chatId,
+                  generation: BigInt(`0x${randomBytes(7).toString('hex')}`),
+                  taskType: 'indexing',
+                  payload: { chatId },
+                  dueAt: now,
+                },
+              });
+          }
 
           return true;
         });

@@ -13,6 +13,7 @@ interface AdminOptions {
   jwtSecret: string;
   publicKeyPem: string;
   autoreplyEnabled?: boolean;
+  embeddingModel: string;
   db: PrismaClient;
   store: PrismaWorkflowStore;
   dispatcher: OutboundDispatcher;
@@ -235,6 +236,47 @@ export function createAdminApi(options: AdminOptions): FastifyInstance {
     if (!(await options.store.getChat(chatId))) return reply.code(404).send({ error: 'Not found' });
 
     return options.store.checkpoint(chatId);
+  });
+
+  app.get<{ Params: { chatId: string } }>('/api/chats/:chatId/progress', async (request, reply) => {
+    const { chatId } = request.params;
+
+    if (!validChatId(chatId)) return reply.code(400).send({ error: 'Invalid request' });
+
+    if (!(await options.store.getChat(chatId))) return reply.code(404).send({ error: 'Not found' });
+
+    const [history, storedMessages, index, chunks] = await Promise.all([
+      options.db.syncCheckpoint.findUnique({
+        where: { chatId_kind: { chatId, kind: 'BACKFILL' } },
+        select: { state: true, lastSuccessAt: true, updatedAt: true },
+      }),
+      options.db.message.count({ where: { chatId } }),
+      options.db.indexingState.findUnique({
+        where: { chatId },
+        select: { updatedAt: true, openIds: true },
+      }),
+      options.db.$queryRaw<Array<{ indexed_messages: bigint; indexed_chunks: bigint }>>`
+        SELECT COUNT(DISTINCT m.message_id) AS indexed_messages,
+          COUNT(DISTINCT c.id) AS indexed_chunks
+        FROM conversation_chunks c
+        LEFT JOIN LATERAL unnest(c.message_ids) AS member(message_id) ON true
+        LEFT JOIN messages m ON m.chat_id = c.chat_id AND m.message_id = member.message_id
+        WHERE c.chat_id = ${chatId} AND c.status = 'FINALIZED'
+          AND c.embedding_model = ${options.embeddingModel} AND c.embedding IS NOT NULL`,
+    ]);
+
+    return {
+      history: {
+        state: history?.state ?? 'NOT_STARTED',
+        lastSuccessAt: history?.lastSuccessAt ?? null,
+        updatedAt: history?.updatedAt ?? null,
+      },
+      storedMessages,
+      indexedMessages: Number(chunks[0]?.indexed_messages ?? 0),
+      indexedChunks: Number(chunks[0]?.indexed_chunks ?? 0),
+      bufferedMessages: index?.openIds.length ?? 0,
+      indexUpdatedAt: index?.updatedAt ?? null,
+    };
   });
 
   app.put<{ Params: { chatId: string }; Body: { expectedVersion?: number; patch?: ChatPatch } }>(

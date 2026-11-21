@@ -136,6 +136,7 @@ async function main(): Promise<void> {
       jwtSecret: settings.adminJwtSecret,
       publicKeyPem: adminPublicKeyPem,
       autoreplyEnabled: settings.autoreplyEnabled,
+      embeddingModel: settings.embeddingModel,
       db,
       store,
       dispatcher,

@@ -551,6 +551,49 @@ textarea:focus-visible {
   letter-spacing: -0.04em;
   margin: 7px 0;
 }
+.chat-progress {
+  background: #101b2a;
+  border: 1px solid #31445e;
+  border-radius: 11px;
+  padding: 16px;
+  margin-top: 20px;
+}
+.chat-progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.chat-progress-head h3 {
+  font-size: 0.95rem;
+  margin: 0;
+}
+.chat-progress-head .secondary {
+  padding: 7px 11px;
+}
+.chat-progress-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.chat-progress-grid > div {
+  min-width: 0;
+}
+.chat-progress-grid span,
+.chat-progress-grid strong,
+.chat-progress-grid small {
+  display: block;
+}
+.chat-progress-grid span,
+.chat-progress-grid small {
+  color: #91a4bc;
+  font-size: 0.76rem;
+}
+.chat-progress-grid strong {
+  margin: 6px 0;
+  font-size: 0.98rem;
+}
 .icon-button {
   background: none;
   border: 0;
@@ -672,6 +715,9 @@ input::placeholder {
   }
   .stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .chat-progress-grid {
+    grid-template-columns: 1fr;
   }
   .stat {
     min-height: 110px;

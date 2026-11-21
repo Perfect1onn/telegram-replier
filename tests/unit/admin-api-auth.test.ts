@@ -14,6 +14,7 @@ test('browser-style P-256 login issues a JWT that gates API routes', async () =>
   } as ITelegramGateway;
   const app = createAdminApi({
     jwtSecret: 'j'.repeat(64),
+    embeddingModel: 'test-1536',
     publicKeyPem: pair.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
     db: {
       systemState: { findUnique: async () => ({ paused: true }) },
@@ -30,6 +31,10 @@ test('browser-style P-256 login issues a JWT that gates API routes', async () =>
     assert.equal((await app.inject({ method: 'GET', url: '/api/status' })).statusCode, 401);
     assert.equal(
       (await app.inject({ method: 'GET', url: '/api/telegram/dialogs' })).statusCode,
+      401,
+    );
+    assert.equal(
+      (await app.inject({ method: 'GET', url: '/api/chats/123/progress' })).statusCode,
       401,
     );
 

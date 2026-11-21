@@ -1,5 +1,5 @@
-import { useState, type FormEvent } from 'react';
-import type { Chat } from '../../../entities/chat/model/types';
+import { useEffect, useState, type FormEvent } from 'react';
+import type { Chat, ChatProgress } from '../../../entities/chat/model/types';
 import { request } from '../../../shared/api/client';
 
 export function ChatEditor({
@@ -16,7 +16,24 @@ export function ChatEditor({
   const [form, setForm] = useState(chat);
   const [busy, setBusy] = useState(false);
   const [backfill, setBackfill] = useState('');
+  const [progress, setProgress] = useState<ChatProgress | null>(null);
+  const [loadingProgress, setLoadingProgress] = useState(false);
   const canBackfill = chat.enabled && chat.mode !== 'OFF';
+
+  async function loadProgress() {
+    setLoadingProgress(true);
+    try {
+      setProgress(await request<ChatProgress>(`/api/chats/${chat.chatId}/progress`));
+    } catch (error) {
+      onError((error as Error).message);
+    } finally {
+      setLoadingProgress(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadProgress();
+  }, [chat.chatId]);
 
   async function save(event: FormEvent) {
     event.preventDefault();
@@ -59,6 +76,7 @@ export function ChatEditor({
         method: 'POST',
       });
       setBackfill(`Задача ${result.jobId} добавлена`);
+      void loadProgress();
     } catch (error) {
       onError((error as Error).message);
     }
@@ -102,6 +120,58 @@ export function ChatEditor({
             ×
           </button>
         </div>
+        <section className="chat-progress" aria-label="Состояние истории и индекса">
+          <div className="chat-progress-head">
+            <h3>История и индекс</h3>
+            <button
+              className="secondary"
+              type="button"
+              disabled={loadingProgress}
+              onClick={() => void loadProgress()}
+            >
+              {loadingProgress ? 'Обновляю…' : 'Обновить'}
+            </button>
+          </div>
+          {progress ? (
+            <div className="chat-progress-grid">
+              <div>
+                <span>Загрузка истории</span>
+                <strong>
+                  {progress.history.state === 'COMPLETE'
+                    ? 'Завершена'
+                    : progress.history.state === 'PENDING'
+                      ? 'Не завершена'
+                      : 'Не запускалась'}
+                </strong>
+                <small>
+                  {progress.history.lastSuccessAt
+                    ? `Последний прогресс: ${new Date(progress.history.lastSuccessAt).toLocaleString('ru-RU')}`
+                    : 'Нет отметки о загрузке'}
+                </small>
+              </div>
+              <div>
+                <span>Сообщения</span>
+                <strong>{progress.storedMessages.toLocaleString('ru-RU')}</strong>
+                <small>Сохранено в базе</small>
+              </div>
+              <div>
+                <span>Поисковый индекс</span>
+                <strong>
+                  {progress.indexedMessages.toLocaleString('ru-RU')} /{' '}
+                  {progress.storedMessages.toLocaleString('ru-RU')}
+                </strong>
+                <small>
+                  {progress.indexedChunks.toLocaleString('ru-RU')} фрагментов
+                  {progress.bufferedMessages ? ` · ${progress.bufferedMessages} в буфере` : ''}
+                </small>
+              </div>
+            </div>
+          ) : (
+            <p className="small-muted">
+              {loadingProgress ? 'Загружаю состояние…' : 'Нет данных о состоянии.'}
+            </p>
+          )}
+        </section>
         <form onSubmit={(event) => void save(event)}>
           <div className="form-grid">
             <label className="check">

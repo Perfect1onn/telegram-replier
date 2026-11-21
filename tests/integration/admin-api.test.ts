@@ -29,6 +29,7 @@ const app = createAdminApi({
   dispatcher,
   gateway: adminGateway,
   jwtSecret: token,
+  embeddingModel: 'test-1536',
   publicKeyPem,
   ready: async () => true,
 });
@@ -95,6 +96,13 @@ test('admin API requires signed-key JWT auth and versioned chat updates', async 
 
   assert.equal(created.statusCode, 200);
   assert.equal(created.json().version, 1);
+
+  const progress = await app.inject({ method: 'GET', url: `${url}/progress`, headers });
+
+  assert.equal(progress.statusCode, 200);
+  assert.equal(progress.json().history.state, 'NOT_STARTED');
+  assert.equal(progress.json().storedMessages, 0);
+  assert.equal(progress.json().indexedMessages, 0);
   assert.equal(
     (
       await app.inject({
@@ -201,6 +209,7 @@ test('explicit draft approval sends only through the dispatcher', async () => {
     db,
     store,
     jwtSecret: token,
+    embeddingModel: 'test-1536',
     publicKeyPem,
     gateway,
     ready: async () => true,

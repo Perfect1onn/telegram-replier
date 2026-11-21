@@ -87,4 +87,8 @@ test('retention removes old text and stale chunks while preserving recent messag
     ['recent text'],
   );
   assert.equal(await db.indexingState.count({ where: { chatId } }), 0);
+  assert.equal(
+    await db.jobOutbox.count({ where: { chatId, taskType: 'indexing', publishedAt: null } }),
+    1,
+  );
 });

@@ -9,3 +9,16 @@ export interface Chat {
   maxRepliesPerHour: number;
   systemPrompt?: string;
 }
+
+export interface ChatProgress {
+  history: {
+    state: 'NOT_STARTED' | 'PENDING' | 'COMPLETE';
+    lastSuccessAt: string | null;
+    updatedAt: string | null;
+  };
+  storedMessages: number;
+  indexedMessages: number;
+  indexedChunks: number;
+  bufferedMessages: number;
+  indexUpdatedAt: string | null;
+}

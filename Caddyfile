@@ -1,0 +1,21 @@
+{
+	default_sni {$PUBLIC_HOST}
+}
+
+{$PUBLIC_HOST} {
+	tls {
+		issuer acme {
+			profile shortlived
+		}
+	}
+
+	@admin path /admin /admin/* /auth/challenge /auth/verify /api/*
+	handle @admin {
+		header Strict-Transport-Security "max-age=31536000"
+		reverse_proxy app:8787
+	}
+
+	handle {
+		respond 404
+	}
+}

@@ -61,6 +61,25 @@ services:
       redis:
         condition: service_healthy
 
+  caddy:
+    profiles: ["public"]
+    image: caddy:2.11.9-alpine
+    restart: unless-stopped
+    environment:
+      PUBLIC_HOST: ${ADMIN_PUBLIC_HOST:-127.0.0.1}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    ports:
+      - "0.0.0.0:80:80"
+      - "0.0.0.0:443:443"
+    depends_on:
+      app:
+        condition: service_started
+
 volumes:
   replier_postgres:
   replier_redis:
+  caddy_data:
+  caddy_config:

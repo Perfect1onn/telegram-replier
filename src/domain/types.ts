@@ -35,10 +35,11 @@ export interface Usage {
   inputTokens: number;
   outputTokens: number;
   cachedInputTokens: number;
+  cacheWriteTokens?: number;
 }
 
 export interface UsagePricing {
-  prices: { input: number; output: number; cached: number };
+  prices: { input: number; output: number; cached: number; cacheWrite?: number };
   version: string;
   effectiveAt: Date;
   dailyBudgetUsd: number;

@@ -56,7 +56,7 @@ test('Responses adapter preserves untrusted boundary and captures actual usage',
             input_tokens: 20,
             output_tokens: 5,
             total_tokens: 25,
-            input_tokens_details: { cached_tokens: 4 },
+            input_tokens_details: { cached_tokens: 4, cache_write_tokens: 3 },
             output_tokens_details: { reasoning_tokens: 0 },
           },
         }),
@@ -64,7 +64,7 @@ test('Responses adapter preserves untrusted boundary and captures actual usage',
       );
     },
   });
-  const provider = new OpenAIProvider(client, 'configured-model');
+  const provider = new OpenAIProvider(client, 'gpt-6.1-terra');
   const answer = await provider.generate(context, AbortSignal.timeout(1000));
   const request = JSON.parse(requestBody);
 
@@ -75,8 +75,10 @@ test('Responses adapter preserves untrusted boundary and captures actual usage',
   assert.ok(!request.input[0].content.includes('other-chat-id'));
   assert.equal(request.store, false);
   assert.equal(request.max_output_tokens, 1024);
+  assert.equal(request.reasoning.effort, 'none');
   assert.equal(answer.text, 'hello');
   assert.equal(answer.usage.cachedInputTokens, 4);
+  assert.equal(answer.usage.cacheWriteTokens, 3);
 });
 test('incomplete responses cannot be sent as completed answers', async () => {
   const client = new OpenAI({

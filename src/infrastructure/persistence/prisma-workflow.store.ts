@@ -118,7 +118,10 @@ export class PrismaWorkflowStore implements IWorkflowStore {
 
     const reservedCost = estimateCost(
       { inputTokens: maxInputTokens, outputTokens: maxOutputTokens, cachedInputTokens: 0 },
-      pricing.prices,
+      {
+        ...pricing.prices,
+        input: Math.max(pricing.prices.input, pricing.prices.cacheWrite ?? pricing.prices.input),
+      },
     );
     const now = new Date();
     const dayStart = new Date(now);

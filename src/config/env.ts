@@ -16,7 +16,7 @@ export interface Settings {
   workerConcurrency: number;
   retentionDays: number;
   dailyBudgetUsd: number;
-  prices: { input: number; output: number; cached: number };
+  prices: { input: number; output: number; cached: number; cacheWrite: number };
   priceVersion: string;
   priceEffectiveAt: Date;
 }
@@ -132,6 +132,9 @@ export function loadSettings(
       input: money('LLM_INPUT_USD_PER_MILLION'),
       output: money('LLM_OUTPUT_USD_PER_MILLION'),
       cached: money('LLM_CACHED_USD_PER_MILLION'),
+      cacheWrite: env.LLM_CACHE_WRITE_USD_PER_MILLION
+        ? money('LLM_CACHE_WRITE_USD_PER_MILLION')
+        : money('LLM_INPUT_USD_PER_MILLION'),
     },
     priceVersion,
     priceEffectiveAt: new Date(priceDate || '1970-01-01'),

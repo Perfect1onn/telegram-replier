@@ -23,6 +23,15 @@ test('cost includes discounted cached tokens', () => {
     0.0025,
   );
 });
+test('cost includes cache writes without double-counting input tokens', () => {
+  assert.equal(
+    estimateCost(
+      { inputTokens: 1000, cachedInputTokens: 200, cacheWriteTokens: 300, outputTokens: 100 },
+      { input: 1, cached: 0.05, cacheWrite: 1.25, output: 5 },
+    ),
+    0.001385,
+  );
+});
 test('sensitive commitments and uncertainty require review', () => {
   for (const text of ['I promise payment', 'пароль abc', 'Я не уверен', 'Meet tomorrow'])
     assert.equal(requiresReview(text), true);
@@ -53,6 +62,26 @@ test('generated answer preserves text without adding a marker', async () => {
     ).text,
     'Спасибо',
   );
+});
+test('generated reply removes AI formatting and dash punctuation', async () => {
+  const service = new AIService({
+    async generate() {
+      return {
+        text: '**Да** — конечно.\n- Напишу `позже`, *ок*?',
+        model: 'fake',
+        usage: { inputTokens: 1, outputTokens: 1, cachedInputTokens: 0 },
+      };
+    },
+  });
+  const answer = await service.generateAnswer({
+    chatId: '1',
+    instructions: '',
+    recentMessages: [],
+    retrievedMemories: [],
+    currentMessage: message(1),
+  });
+
+  assert.equal(answer.text, 'Да, конечно. Напишу позже, ок?');
 });
 test('chunk boundaries, duplicate, Unicode and deterministic hash', () => {
   const chunker = new ConversationChunker(300);

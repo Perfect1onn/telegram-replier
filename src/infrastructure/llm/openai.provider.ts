@@ -15,6 +15,7 @@ export class OpenAIProvider implements ILLMProvider {
     const response = await this.client.responses.create(
       {
         model: this.model,
+        ...(this.model === 'gpt-6.1-terra' ? { reasoning: { effort: 'none' as const } } : {}),
         instructions: context.instructions,
         input: [
           {
@@ -48,6 +49,7 @@ export class OpenAIProvider implements ILLMProvider {
         inputTokens: response.usage.input_tokens,
         outputTokens: response.usage.output_tokens,
         cachedInputTokens: response.usage.input_tokens_details.cached_tokens,
+        cacheWriteTokens: response.usage.input_tokens_details.cache_write_tokens,
       },
     };
   }

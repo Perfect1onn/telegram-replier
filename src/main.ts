@@ -253,7 +253,7 @@ async function main(): Promise<void> {
     };
 
     sweepSummaries();
-    summaryTimer = setInterval(sweepSummaries, 60000);
+    summaryTimer = setInterval(sweepSummaries, 5000);
 
     logger.info({ event: 'ready', autoReplyEnabled: settings.autoreplyEnabled });
 

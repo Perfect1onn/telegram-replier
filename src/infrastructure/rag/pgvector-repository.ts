@@ -88,6 +88,52 @@ export class PgVectorRepository {
     }));
   }
 
+  async searchLexical(query: string, limit: number): Promise<RetrievedChunk[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 10)
+      throw new Error('Invalid search limit');
+
+    const ignored = new Set([
+      'какой',
+      'какая',
+      'какие',
+      'такой',
+      'такая',
+      'зовут',
+      'скажи',
+      'расскажи',
+      'about',
+      'what',
+      'where',
+      'which',
+      'please',
+    ]);
+    const terms = (query.toLowerCase().match(/[\p{L}\p{N}]{4,}/gu) ?? [])
+      .filter((term) => !ignored.has(term))
+      .slice(0, 5);
+
+    if (!terms.length) return [];
+
+    const tsQuery = terms.join(' | ');
+    const rows = await this.db.$queryRaw<VectorRow[]>`
+      SELECT c.id::text, c.chat_id, c.content, c.message_ids,
+        ts_rank_cd(to_tsvector('russian', c.content), to_tsquery('russian', ${tsQuery})) AS score
+      FROM conversation_chunks c
+      JOIN allowed_chats a ON a.chat_id = c.chat_id
+      WHERE c.status = 'FINALIZED' AND c.embedding_model = ${this.model}
+        AND a.enabled AND a.mode <> 'OFF'
+        AND to_tsvector('russian', c.content) @@ to_tsquery('russian', ${tsQuery})
+      ORDER BY score DESC, c.updated_at DESC
+      LIMIT ${limit}`;
+
+    return rows.map((row) => ({
+      id: row.id,
+      chatId: row.chat_id,
+      content: row.content,
+      messageIds: row.message_ids,
+      score: row.score,
+    }));
+  }
+
   async searchOwner(
     vector: readonly number[],
     limit: number,

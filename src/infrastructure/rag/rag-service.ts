@@ -33,13 +33,27 @@ export class RagService implements IRagService {
 
     if (!chat?.enabled || chat.mode === 'OFF') return [];
 
-    const vector = await this.embeddings.embedQuery(query);
+    const lexical = await this.vectors.searchLexical(query, 5).catch(() => []);
+    let semantic: RetrievedChunk[] = [];
 
-    const chunks = await this.vectors.search(vector, 10);
+    try {
+      const vector = await this.embeddings.embedQuery(query);
+
+      semantic = await this.vectors.search(vector, 10);
+    } catch (error) {
+      if (!lexical.length) throw error;
+    }
+
+    const chunks = [...lexical, ...semantic];
     const selected: RetrievedChunk[] = [];
+    const seen = new Set<string>();
     const since = new Date(Date.now() - 183 * 86400000);
 
     for (const chunk of chunks) {
+      if (seen.has(chunk.id)) continue;
+
+      seen.add(chunk.id);
+
       if (chunk.chatId === chatId) {
         selected.push(chunk);
       } else {

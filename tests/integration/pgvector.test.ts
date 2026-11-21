@@ -17,7 +17,12 @@ test('pgvector upsert is idempotent and search spans chats', async () => {
   const a = String(BigInt(`5${Date.now()}`));
   const b = String(BigInt(`6${Date.now()}`));
 
-  await db.allowedChat.createMany({ data: [{ chatId: a }, { chatId: b }] });
+  await db.allowedChat.createMany({
+    data: [
+      { chatId: a, enabled: true, mode: 'DRAFT' },
+      { chatId: b, enabled: true, mode: 'DRAFT' },
+    ],
+  });
   await db.message.createMany({
     data: [
       {
@@ -50,7 +55,7 @@ test('pgvector upsert is idempotent and search spans chats', async () => {
   const chunkA = {
     id: randomUUID(),
     chatId: a,
-    content: 'alpha',
+    content: 'Мою маму зовут Светлана',
     messageIds: ['1'],
     tokenCount: 5,
   };
@@ -63,7 +68,7 @@ test('pgvector upsert is idempotent and search spans chats', async () => {
   assert.equal(await db.conversationChunk.count({ where: { chatId: a } }), 1);
   assert.deepEqual(
     (await vectors.search(first, 1)).map((row) => row.content),
-    ['alpha'],
+    ['Мою маму зовут Светлана'],
   );
   assert.deepEqual(
     (await vectors.search(second, 1)).map((row) => row.content),
@@ -77,6 +82,10 @@ test('pgvector upsert is idempotent and search spans chats', async () => {
     (await vectors.searchOwner(first, 2, new Date(Date.now() - 183 * 86400000))).map(
       (row) => row.chatId,
     ),
+    [a],
+  );
+  assert.deepEqual(
+    (await vectors.searchLexical('как зовут маму', 2)).map((row) => row.chatId),
     [a],
   );
   await assert.rejects(vectors.search([1], 5));

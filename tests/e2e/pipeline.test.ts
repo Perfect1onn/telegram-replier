@@ -204,6 +204,8 @@ test('retrieval outage falls back to recent messages and other-chat memories are
   assert.equal(context.chatSummary, 'За шесть месяцев обсуждали проект.');
   assert.deepEqual(context.ownerExamples, ['ну да, ок?', 'ага :)']);
   assert.equal(context.ownerProfile?.about, 'Разработчик');
+  assert.match(context.instructions, /writing as the human account owner, in first person/);
+  assert.match(context.instructions, /If asked whether you are an AI or bot/);
   assert.ok(context.recentMessages.every((message) => message.chatId === '1'));
 });
 test('hourly limit denies subsequent sends', async () => {

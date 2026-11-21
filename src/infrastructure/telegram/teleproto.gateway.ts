@@ -231,12 +231,12 @@ export class TeleprotoGateway implements ITelegramGateway {
   async sendMessage(input: {
     chatId: string;
     text: string;
-    replyToMessageId: string;
+    replyToMessageId?: string;
     dedupeKey: string;
   }): Promise<{ messageId: string }> {
     const result = await this.connected().sendMessage(input.chatId, {
       message: input.text,
-      replyTo: messageNumber(input.replyToMessageId),
+      ...(input.replyToMessageId ? { replyTo: messageNumber(input.replyToMessageId) } : {}),
       formattingEntities: [],
       linkPreview: false,
     });

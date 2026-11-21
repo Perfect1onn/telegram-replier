@@ -2,9 +2,10 @@ import type { Answer, ChatMessage, LLMContext } from '../../domain/types.ts';
 import type { ILLMProvider, IRagService, ITelegramGateway } from '../../ports/contracts.ts';
 
 export class FakeGateway implements ITelegramGateway {
-  sent: { chatId: string; text: string; dedupeKey: string }[] = [];
+  sent: { chatId: string; text: string; dedupeKey: string; replyToMessageId?: string }[] = [];
   privateDialogs: Array<{ chatId: string; title: string }> = [];
   fail = false;
+  failAt?: number;
   history: ChatMessage[] = [];
 
   async connect(): Promise<void> {}
@@ -29,10 +30,12 @@ export class FakeGateway implements ITelegramGateway {
     chatId: string;
     text: string;
     dedupeKey: string;
+    replyToMessageId?: string;
   }): Promise<{ messageId: string }> {
     this.sent.push(input);
 
-    if (this.fail) throw new Error('Ambiguous transport failure');
+    if (this.fail || this.sent.length === this.failAt)
+      throw new Error('Ambiguous transport failure');
 
     return { messageId: String(100000 + this.sent.length) };
   }

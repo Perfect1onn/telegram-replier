@@ -204,6 +204,61 @@ export class MemoryStore implements IWorkflowStore {
     return structuredClone(operation);
   }
 
+  async claimFollowup(
+    input: ReplyInput,
+    previousOperationId: string,
+    answer: Answer,
+    now: number,
+  ): Promise<ReplyOperation | null> {
+    const chat = this.chats.get(input.chatId);
+    const previous = [...this.operations.values()].find(
+      (operation) => operation.id === previousOperationId,
+    );
+
+    if (
+      this.paused ||
+      !chat?.enabled ||
+      chat.mode !== 'AUTO' ||
+      chat.version !== input.configVersion ||
+      this.generations.get(input.chatId) !== input.generation ||
+      previous?.chatId !== input.chatId ||
+      previous.status !== 'SENT'
+    )
+      return null;
+
+    const active = [...this.operations.values()].filter(
+      (operation) => operation.chatId === input.chatId,
+    );
+
+    if (
+      active.some((operation) => operation.status === 'SENDING' || operation.status === 'UNKNOWN')
+    )
+      return null;
+
+    if (
+      active.filter((operation) => operation.status === 'SENT' && operation.dueAt >= now - 3600000)
+        .length >= chat.maxRepliesPerHour
+    )
+      return null;
+
+    const generation = -this.operations.size - 1;
+    const id = `${input.chatId}:${generation}`;
+    const operation: ReplyOperation = {
+      id,
+      chatId: input.chatId,
+      generation,
+      configVersion: input.configVersion,
+      triggerMessageId: input.triggerMessageId,
+      dueAt: now,
+      status: 'SENDING',
+      answer,
+    };
+
+    this.operations.set(id, operation);
+
+    return structuredClone(operation);
+  }
+
   async finishSend(id: string, result: { messageId: string } | null): Promise<void> {
     const operation = this.operations.get(id);
 

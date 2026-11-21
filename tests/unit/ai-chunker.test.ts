@@ -83,6 +83,27 @@ test('generated reply removes AI formatting and dash punctuation', async () => {
 
   assert.equal(answer.text, 'Да, конечно. Напишу позже, ок?');
 });
+test('structured answer keeps distinct sanitized message parts', async () => {
+  const service = new AIService({
+    async generate() {
+      return {
+        text: JSON.stringify({ messages: ['**Да**', 'И ещё — завтра напишу'] }),
+        model: 'fake',
+        usage: { inputTokens: 1, outputTokens: 1, cachedInputTokens: 0 },
+      };
+    },
+  });
+  const answer = await service.generateAnswer({
+    chatId: '1',
+    instructions: '',
+    recentMessages: [],
+    retrievedMemories: [],
+    currentMessage: message(1),
+  });
+
+  assert.deepEqual(answer.parts, ['Да', 'И ещё, завтра напишу']);
+  assert.equal(answer.text, 'Да\nИ ещё, завтра напишу');
+});
 test('chunk boundaries, duplicate, Unicode and deterministic hash', () => {
   const chunker = new ConversationChunker(300);
   const first = chunker.append(null, message(1));

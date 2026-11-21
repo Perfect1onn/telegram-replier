@@ -47,6 +47,7 @@ export interface UsagePricing {
 
 export interface Answer {
   text: string;
+  parts?: string[];
   model: string;
   usage: Usage;
 }

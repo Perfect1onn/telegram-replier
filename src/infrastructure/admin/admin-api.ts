@@ -474,7 +474,9 @@ export function createAdminApi(options: AdminOptions): FastifyInstance {
           message.messageId === messageId &&
           message.direction === 'OUTGOING' &&
           message.text === operation.generatedText &&
-          message.replyToMessageId === operation.triggerMessageId,
+          (operation.generation < 0n
+            ? !message.replyToMessageId
+            : message.replyToMessageId === operation.triggerMessageId),
       );
 
       if (!match) return reply.code(409).send({ error: 'Conflict' });

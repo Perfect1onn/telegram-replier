@@ -76,6 +76,8 @@ test('Responses adapter preserves untrusted boundary and captures actual usage',
   assert.equal(request.store, false);
   assert.equal(request.max_output_tokens, 1024);
   assert.equal(request.reasoning.effort, 'none');
+  assert.equal(request.text.format.type, 'json_schema');
+  assert.equal(request.text.format.schema.properties.messages.maxItems, 3);
   assert.equal(answer.text, 'hello');
   assert.equal(answer.usage.cachedInputTokens, 4);
   assert.equal(answer.usage.cacheWriteTokens, 3);

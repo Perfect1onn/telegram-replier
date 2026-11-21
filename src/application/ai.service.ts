@@ -35,6 +35,29 @@ export function estimateCost(
   );
 }
 
+function plainReply(raw: string): string {
+  return raw
+    .trim()
+    .replace(/^```[^\n]*\n?|^```\s*$/gm, '')
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    .replace(/^\s*(?:[-*•]|\d+[.)])\s+/gm, '')
+    .replace(
+      /\*\*([^*]+)\*\*|__([^_]+)__/g,
+      (_match, bold: string, underlined: string) => bold ?? underlined,
+    )
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '$1 $2')
+    .replace(
+      /(?<!\w)(?:\*([^*\n]+)\*|_([^_\n]+)_|~~([^~\n]+)~~)(?!\w)/g,
+      (_match, italic: string, underlined: string, crossed: string) =>
+        italic ?? underlined ?? crossed,
+    )
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\s*[—–]\s*|\s+-\s+/g, ', ')
+    .replace(/\s*\n+\s*/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 export class AIService {
   private provider: ILLMProvider;
 
@@ -44,30 +67,36 @@ export class AIService {
 
   async generateAnswer(context: LLMContext): Promise<Answer> {
     const answer = await this.provider.generate(context, AbortSignal.timeout(30000));
-    const text = answer.text
-      .trim()
-      .replace(/^```[^\n]*\n?|^```\s*$/gm, '')
-      .replace(/^\s{0,3}#{1,6}\s+/gm, '')
-      .replace(/^\s*(?:[-*•]|\d+[.)])\s+/gm, '')
-      .replace(
-        /\*\*([^*]+)\*\*|__([^_]+)__/g,
-        (_match, bold: string, underlined: string) => bold ?? underlined,
-      )
-      .replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '$1 $2')
-      .replace(
-        /(?<!\w)(?:\*([^*\n]+)\*|_([^_\n]+)_|~~([^~\n]+)~~)(?!\w)/g,
-        (_match, italic: string, underlined: string, crossed: string) =>
-          italic ?? underlined ?? crossed,
-      )
-      .replace(/`([^`]+)`/g, '$1')
-      .replace(/\s*[—–]\s*|\s+-\s+/g, ', ')
-      .replace(/\s*\n+\s*/g, ' ')
-      .replace(/\s{2,}/g, ' ')
-      .trim();
+    const raw = answer.text.trim();
+    let rawParts: string[] = [raw];
 
-    if (!text || text.length > 4096 || /\p{Cc}/u.test(text.replace(/[\n\t\r]/g, '')))
+    if (raw.startsWith('{')) {
+      const parsed: unknown = JSON.parse(raw);
+
+      if (
+        !parsed ||
+        typeof parsed !== 'object' ||
+        !('messages' in parsed) ||
+        !Array.isArray(parsed.messages) ||
+        parsed.messages.length < 1 ||
+        parsed.messages.length > 3 ||
+        parsed.messages.some((part: unknown) => typeof part !== 'string')
+      )
+        throw new Error('Invalid model output');
+
+      rawParts = parsed.messages as string[];
+    }
+
+    const parts = rawParts.map(plainReply);
+    const text = parts.join('\n');
+
+    if (
+      parts.some((part) => !part || part.length > 4096) ||
+      text.length > 4096 ||
+      /\p{Cc}/u.test(text.replace(/[\n\t\r]/g, ''))
+    )
       throw new Error('Invalid model output');
 
-    return { ...answer, text };
+    return { ...answer, text, parts };
   }
 }

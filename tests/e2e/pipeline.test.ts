@@ -128,6 +128,61 @@ test('unknown send never retries and blocks following sends', async () => {
   assert.equal(f.gateway.sent.length, 1);
   assert.equal([...f.store.operations.values()][0]?.status, 'UNKNOWN');
 });
+test('three-part answer sends in order with separate operations', async () => {
+  const f = fixture();
+
+  f.store.paused = false;
+  await f.ingestion.handle(f.message(1));
+
+  const job = [...f.store.operations.values()][0];
+
+  assert.ok(job);
+
+  const parts = ['Да, видел', 'там ещё одна деталь', 'вечером расскажу'];
+
+  await f.dispatcher.dispatch(job, {
+    text: parts.join('\n'),
+    parts,
+    model: 'fake',
+    usage: { inputTokens: 1, outputTokens: 1, cachedInputTokens: 0 },
+  });
+  assert.deepEqual(
+    f.gateway.sent.map((item) => item.text),
+    parts,
+  );
+  assert.equal(f.gateway.sent[0]?.replyToMessageId, '1');
+  assert.equal(f.gateway.sent[1]?.replyToMessageId, undefined);
+  assert.equal(f.store.operations.size, 3);
+  assert.ok([...f.store.operations.values()].every((item) => item.status === 'SENT'));
+});
+test('ambiguous second message prevents the third and future replies', async () => {
+  const f = fixture();
+
+  f.store.paused = false;
+  f.gateway.failAt = 2;
+  await f.ingestion.handle(f.message(1));
+
+  const job = [...f.store.operations.values()][0];
+
+  assert.ok(job);
+
+  const parts = ['да', 'и ещё', 'потом'];
+
+  await f.dispatcher.dispatch(job, {
+    text: parts.join('\n'),
+    parts,
+    model: 'fake',
+    usage: { inputTokens: 1, outputTokens: 1, cachedInputTokens: 0 },
+  });
+  assert.equal(f.gateway.sent.length, 2);
+  assert.deepEqual(
+    [...f.store.operations.values()].map((item) => item.status),
+    ['SENT', 'UNKNOWN'],
+  );
+  await f.ingestion.handle(f.message(2));
+  await f.drain();
+  assert.equal(f.gateway.sent.length, 2);
+});
 test('config version change during generation prevents dispatch', async () => {
   const f = fixture();
 

@@ -17,6 +17,26 @@ export class OpenAIProvider implements ILLMProvider {
         model: this.model,
         ...(this.model === 'gpt-6.1-terra' ? { reasoning: { effort: 'none' as const } } : {}),
         instructions: context.instructions,
+        text: {
+          format: {
+            type: 'json_schema',
+            name: 'telegram_reply',
+            strict: true,
+            schema: {
+              type: 'object',
+              properties: {
+                messages: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  minItems: 1,
+                  maxItems: 3,
+                },
+              },
+              required: ['messages'],
+              additionalProperties: false,
+            },
+          },
+        },
         input: [
           {
             role: 'user',

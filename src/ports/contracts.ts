@@ -41,6 +41,12 @@ export interface IWorkflowStore extends IChatAdminService, IMessageRepository {
     approved: boolean,
     now: number,
   ): Promise<ReplyOperation | null>;
+  claimFollowup(
+    input: ReplyInput,
+    previousOperationId: string,
+    answer: Answer,
+    now: number,
+  ): Promise<ReplyOperation | null>;
   finishSend(id: string, result: { messageId: string } | null): Promise<void>;
   audit(event: AuditEvent): Promise<void>;
   saveHistory(
@@ -75,7 +81,7 @@ export interface ITelegramGateway {
   sendMessage(input: {
     chatId: string;
     text: string;
-    replyToMessageId: string;
+    replyToMessageId?: string;
     dedupeKey: string;
   }): Promise<{ messageId: string }>;
 }

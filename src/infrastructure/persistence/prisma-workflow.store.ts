@@ -695,6 +695,71 @@ export class PrismaWorkflowStore implements IWorkflowStore {
     });
   }
 
+  async claimFollowup(
+    input: ReplyInput,
+    previousOperationId: string,
+    answer: Answer,
+    now: number,
+  ): Promise<ReplyOperation | null> {
+    return this.db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM system_state WHERE id = 1 FOR UPDATE`;
+
+      const system = await tx.systemState.findUnique({ where: { id: 1 } });
+
+      if (!system || system.paused) return null;
+
+      const chat = await this.lockChat(tx, input.chatId);
+
+      if (!chat.enabled || chat.mode !== 'AUTO' || chat.version !== input.configVersion)
+        return null;
+
+      const state = await tx.chatRuntimeState.findUnique({ where: { chatId: input.chatId } });
+
+      if (state?.generation !== BigInt(input.generation)) return null;
+
+      const previous = await tx.replyOperation.findUnique({ where: { id: previousOperationId } });
+
+      if (!previous || previous.chatId !== input.chatId || previous.status !== 'SENT') return null;
+
+      const unresolved = await tx.replyOperation.count({
+        where: { chatId: input.chatId, status: { in: ['SENDING', 'UNKNOWN'] } },
+      });
+
+      if (unresolved) return null;
+
+      const sent = await tx.replyOperation.count({
+        where: {
+          chatId: input.chatId,
+          status: 'SENT',
+          updatedAt: { gte: new Date(now - 3600000) },
+        },
+      });
+
+      if (sent >= chat.maxRepliesPerHour) return null;
+
+      const id = randomUUID();
+      const generation = -BigInt(`0x${randomBytes(6).toString('hex')}`) - 1n;
+
+      return mapOperation(
+        await tx.replyOperation.create({
+          data: {
+            id,
+            chatId: input.chatId,
+            generation,
+            configVersion: input.configVersion,
+            triggerMessageId: input.triggerMessageId,
+            status: 'SENDING',
+            dedupeKey: `${input.chatId}:followup:${id}`,
+            generatedText: answer.text,
+            attempts: 1,
+            dueAt: new Date(now),
+            updatedAt: new Date(now),
+          },
+        }),
+      );
+    });
+  }
+
   async finishSend(id: string, result: { messageId: string } | null): Promise<void> {
     await this.db.$transaction(async (tx) => {
       const operation = await tx.replyOperation.findUnique({ where: { id } });
